@@ -51,6 +51,93 @@ def _gaussian_filter(image: np.ndarray, sigma: float) -> np.ndarray:
     return smoothed.astype(np.float32)
 
 
+def _discrete_gaussian_1d_kernel(sigma: float, radius: int) -> np.ndarray:
+    """Normalised 1D Gaussian weights for integer offsets in [-radius, radius]."""
+    if sigma <= 0:
+        k = np.zeros(2 * radius + 1, dtype=np.float64)
+        k[radius] = 1.0
+        return k
+    offs = np.arange(-radius, radius + 1, dtype=np.float64)
+    g = np.exp(-0.5 * (offs / sigma) ** 2)
+    g /= g.sum() + 1e-12
+    return g
+
+
+def _discrete_gaussian_2d_kernel(sigma: float, radius: int) -> np.ndarray:
+    """Normalised 2D Gaussian on an integer grid."""
+    if sigma <= 0:
+        k = np.zeros((2 * radius + 1, 2 * radius + 1), dtype=np.float64)
+        k[radius, radius] = 1.0
+        return k
+    ax = np.arange(-radius, radius + 1, dtype=np.float64)
+    gx = np.exp(-0.5 * (ax / sigma) ** 2)
+    g2 = np.outer(gx, gx)
+    g2 /= g2.sum() + 1e-12
+    return g2
+
+
+def _unsharp_mask_nonnegative(f: np.ndarray, sigma: float, strength: float) -> np.ndarray:
+    """Mild sharpening (paper-style Gaussian deconvolution surrogate)."""
+    if sigma <= 0 or strength <= 0:
+        return f
+    blurred = _gaussian_filter(f.astype(np.float64), sigma)
+    out = f.astype(np.float64) + strength * (f.astype(np.float64) - blurred)
+    return np.clip(out, 0.0, None)
+
+
+def local_square_mask(shape: tuple[int, int], center: tuple[int, int], radius: int) -> np.ndarray:
+    """Build a square mask around one peak centre on the discrete D-grid."""
+    mask = np.zeros(shape, dtype=bool)
+    ci, cj = center
+    i0, i1 = max(0, ci - radius), min(shape[0], ci + radius + 1)
+    j0, j1 = max(0, cj - radius), min(shape[1], cj + radius + 1)
+    mask[i0:i1, j0:j1] = True
+    return mask
+
+
+def compute_weight_matrix_dei(weight_matrix: np.ndarray) -> float:
+    """
+    Compute an exact DEI from a compartment-level 2C or 3C weight matrix.
+
+    This is the cleanest generator-side ground truth because it is measured
+    before rasterisation, smoothing, or NNLS blur.
+    """
+    weight_matrix = np.asarray(weight_matrix, dtype=np.float64)
+    diag_sum = float(np.trace(weight_matrix))
+    off_diag_sum = float(weight_matrix.sum() - diag_sum)
+    return off_diag_sum / (diag_sum + 1e-10)
+
+
+def compute_pair_blob_masses(
+    f: np.ndarray,
+    pair_indices: tuple[int, int],
+    radius: int = 4,
+) -> dict[str, float]:
+    """
+    Sum local diagonal and off-diagonal peak masses for one 2C peak pair.
+
+    The masks are anchored at the expected peak centres, matching the "peak
+    intensity" interpretation used in the validation section of the report.
+    """
+    i, j = pair_indices
+    diag_mask = local_square_mask(f.shape, (i, i), radius) | local_square_mask(f.shape, (j, j), radius)
+    off_mask = local_square_mask(f.shape, (i, j), radius) | local_square_mask(f.shape, (j, i), radius)
+    return {
+        "diagonal": float(f[diag_mask].sum()),
+        "off_diagonal": float(f[off_mask].sum()),
+    }
+
+
+def compute_pair_blob_dei(
+    f: np.ndarray,
+    pair_indices: tuple[int, int],
+    radius: int = 4,
+) -> float:
+    """Compute a local blob-wise DEI for one expected 2C peak pair."""
+    masses = compute_pair_blob_masses(f, pair_indices, radius=radius)
+    return masses["off_diagonal"] / (masses["diagonal"] + 1e-10)
+
+
 class ForwardModel2D:
     """2D DEXSY forward model for paper-style synthetic dataset generation."""
 
@@ -70,8 +157,9 @@ class ForwardModel2D:
         exchange_rate_range: tuple = (0.1, 30.0),
         exchange_rate_grid_size: int = 24,
         jitter_pixels: int = 1,
-        smoothing_sigma_range: tuple = (1.2, 2.2),
+        smoothing_sigma_range: tuple = (0.65, 1.15),
         min_index_separation: int = 4,
+        spectral_broadening_mode: str = "directional",
     ):
         """
         Initialise the paper-style 2D DEXSY forward model.
@@ -91,9 +179,15 @@ class ForwardModel2D:
             exchange_rate_range: Exchange-rate sampling range in s^-1.
             exchange_rate_grid_size: Number of log-spaced rate candidates.
             jitter_pixels: Peak jitter in pixels.
-            smoothing_sigma_range: Gaussian broadening sigma range.
+            smoothing_sigma_range: Gaussian broadening sigma range (pixels).
             min_index_separation: Minimum projected grid separation between
                 compartment diffusivities.
+            spectral_broadening_mode: "directional" (default) places self-retention
+                mass only along the D1=D2 diagonal on the grid, and exchange mass
+                with a local 2D Gaussian. This avoids the large artificial DEI
+                inflation caused by isotropic blurring of diagonal peaks into
+                off-diagonal bins. Use "isotropic" for the legacy whole-image
+                Gaussian convolution.
         """
         self.n_d = n_d
         self.n_b = n_b
@@ -108,6 +202,9 @@ class ForwardModel2D:
         self.jitter_pixels = jitter_pixels
         self.smoothing_sigma_range = smoothing_sigma_range
         self.min_index_separation = min_index_separation
+        if spectral_broadening_mode not in ("directional", "isotropic"):
+            raise ValueError(f"Unknown spectral_broadening_mode: {spectral_broadening_mode}")
+        self.spectral_broadening_mode = spectral_broadening_mode
 
         self.compartment_ranges = {
             "intracellular": (5e-12, 3e-11),
@@ -281,20 +378,47 @@ class ForwardModel2D:
         if smoothing_sigma is None:
             smoothing_sigma = float(np.random.uniform(*self.smoothing_sigma_range))
 
-        spectrum = np.zeros((self.n_d, self.n_d), dtype=np.float32)
+        spectrum = np.zeros((self.n_d, self.n_d), dtype=np.float64)
         base_indices = [self._nearest_diffusion_index(d) for d in diffusions]
         jittered_indices = [self._jitter_index(idx, jitter_pixels) for idx in base_indices]
 
-        for i in range(weight_matrix.shape[0]):
-            for j in range(weight_matrix.shape[1]):
-                weight = float(weight_matrix[i, j])
-                if weight <= 0:
-                    continue
-                idx_i = jittered_indices[i]
-                idx_j = jittered_indices[j]
-                spectrum[idx_i, idx_j] += weight
+        if self.spectral_broadening_mode == "directional":
+            sigma = float(smoothing_sigma)
+            radius = max(1, int(np.ceil(3.0 * sigma)))
+            g1 = _discrete_gaussian_1d_kernel(sigma, radius)
+            g2 = _discrete_gaussian_2d_kernel(sigma, radius)
+            for i in range(weight_matrix.shape[0]):
+                for j in range(weight_matrix.shape[1]):
+                    weight = float(weight_matrix[i, j])
+                    if weight <= 0:
+                        continue
+                    ia = jittered_indices[i]
+                    jb = jittered_indices[j]
+                    if ia == jb:
+                        for k, gk in enumerate(g1):
+                            kk = k - radius
+                            ii = ia + kk
+                            if 0 <= ii < self.n_d:
+                                spectrum[ii, ii] += weight * gk
+                    else:
+                        for di in range(2 * radius + 1):
+                            for dj in range(2 * radius + 1):
+                                ii = ia + di - radius
+                                jj = jb + dj - radius
+                                if 0 <= ii < self.n_d and 0 <= jj < self.n_d:
+                                    spectrum[ii, jj] += weight * g2[di, dj]
+        else:
+            for i in range(weight_matrix.shape[0]):
+                for j in range(weight_matrix.shape[1]):
+                    weight = float(weight_matrix[i, j])
+                    if weight <= 0:
+                        continue
+                    idx_i = jittered_indices[i]
+                    idx_j = jittered_indices[j]
+                    spectrum[idx_i, idx_j] += weight
 
-        spectrum = _gaussian_filter(spectrum, sigma=smoothing_sigma)
+            spectrum = _gaussian_filter(spectrum.astype(np.float32), sigma=smoothing_sigma)
+
         spectrum = np.clip(spectrum, 0.0, None)
         spectrum /= spectrum.sum() + 1e-12
         return spectrum.astype(np.float32), float(smoothing_sigma), tuple(int(i) for i in jittered_indices)
@@ -556,12 +680,27 @@ class ForwardModel2D:
             return F, S, params_list, S_clean
         return F, S, params_list
 
-    def compute_ilt_nnls(self, s: np.ndarray, alpha: float = 0.01) -> np.ndarray:
-        """Compute a 2D ILT baseline using non-negative least squares."""
-        K = self.kernel_matrix
-        s_flat = s.flatten()
+    def compute_ilt_nnls(
+        self,
+        s: np.ndarray,
+        alpha: float = 0.02,
+        *,
+        post_sharpen: bool = False,
+        sharpen_sigma: float = 0.85,
+        sharpen_strength: float = 0.38,
+        renorm: bool = True,
+    ) -> np.ndarray:
+        """
+        Compute a 2D ILT baseline using non-negative (Tikhonov-regularised) least squares.
 
-        K_reg = np.vstack([K, alpha * np.eye(self.n_d * self.n_d)])
+        Optional mild unsharp masking approximates the Gaussian deconvolution stage
+        described for the Python 2D ILT pipeline in the dissertation (reduces
+        over-smoothed off-diagonal leakage in DEI).
+        """
+        K = self.kernel_matrix
+        s_flat = s.flatten().astype(np.float64)
+
+        K_reg = np.vstack([K.astype(np.float64), alpha * np.eye(self.n_d * self.n_d)])
         s_reg = np.concatenate([s_flat, np.zeros(self.n_d * self.n_d)])
         try:
             from scipy.optimize import nnls
@@ -580,15 +719,82 @@ class ForwardModel2D:
                     break
                 f_flat = updated
         f_est = f_flat.reshape(self.n_d, self.n_d)
-        return f_est
+        if post_sharpen:
+            f_est = _unsharp_mask_nonnegative(f_est, sharpen_sigma, sharpen_strength)
+        if renorm:
+            f_est = np.clip(f_est, 0.0, None)
+            f_est /= f_est.sum() + 1e-12
+        return f_est.astype(np.float64)
+
+    def generate_2c_validation_spectrum(
+        self,
+        diffusions: np.ndarray,
+        volume_fractions: np.ndarray,
+        exchange_rate: float,
+        mixing_time: float,
+        *,
+        jitter_pixels: int = 0,
+        smoothing_sigma: float | None = None,
+        normalize: bool | None = True,
+    ) -> tuple:
+        """
+        Build a noise-free 2-compartment spectrum and signal for Section 3.1-style checks.
+
+        Uses the same exchange and projection path as ``generate_2compartment_paper`` so
+        validation matches the training forward model (no duplicate notebook physics).
+        """
+        diffusions = np.asarray(diffusions, dtype=np.float64).reshape(2)
+        volume_fractions = np.asarray(volume_fractions, dtype=np.float64).reshape(2)
+        pair_indices = tuple(int(self._nearest_diffusion_index(d)) for d in diffusions)
+        exchange_rates = np.zeros((2, 2), dtype=np.float64)
+        exchange_rates[0, 1] = exchange_rate
+        exchange_rates[1, 0] = exchange_rate
+
+        f, weight_matrix, exchange_probs, used_sigma, exchange_scale, jittered_indices = self._generate_paper_spectrum(
+            diffusions=diffusions,
+            volume_fractions=volume_fractions,
+            exchange_rates=exchange_rates,
+            mixing_time=mixing_time,
+            jitter_pixels=jitter_pixels,
+            smoothing_sigma=smoothing_sigma,
+        )
+        clean_signal = self.compute_signal(f, noise_sigma=0.0, normalize=normalize, noise_model=None)
+        theoretical_peak_masses = {
+            "diagonal": float(weight_matrix[0, 0] + weight_matrix[1, 1]),
+            "off_diagonal": float(weight_matrix[0, 1] + weight_matrix[1, 0]),
+        }
+        params = {
+            "n_compartments": 2,
+            "mixing_time": float(mixing_time),
+            "diffusions": diffusions.tolist(),
+            "volume_fractions": volume_fractions.tolist(),
+            "exchange_rates": {"0-1": float(exchange_rate)},
+            "exchange_probabilities": {"0-1": float(exchange_probs[0, 1])},
+            "smoothing_sigma": float(used_sigma),
+            "exchange_probability_scale": float(exchange_scale),
+            "weight_matrix": weight_matrix.copy(),
+            "pair_indices": pair_indices,
+            "expected_peak_centres": {
+                "diagonal": ((pair_indices[0], pair_indices[0]), (pair_indices[1], pair_indices[1])),
+                "off_diagonal": ((pair_indices[0], pair_indices[1]), (pair_indices[1], pair_indices[0])),
+            },
+            "theoretical_peak_masses": theoretical_peak_masses,
+            "theoretical_dei": compute_weight_matrix_dei(weight_matrix),
+            "jittered_indices": tuple(int(i) for i in jittered_indices),
+        }
+        return f, clean_signal, params
 
 
-def compute_dei(f: np.ndarray, diagonal_band_width: int = 2) -> float:
+def compute_dei(f: np.ndarray, diagonal_band_width: int = 5) -> float:
     """
     Compute Diffusion Exchange Index for broadened spectra.
 
-    Using a narrow diagonal band is more appropriate than a strict trace once
-    jitter and Gaussian broadening are introduced.
+    Mass with |i - j| <= ``diagonal_band_width`` is treated as lying in the
+    D1 \\approx D2 (self-diffusion) band on the discrete grid; the rest counts
+    toward exchange. A width of ~5 matches the spatial spread of NNLS-based
+    2D ILT on this 64x64 grid so that ground-truth and inverted spectra are
+    compared on the same footing (a width of 2 is often too narrow once
+    broadening or ILT blur is present).
     """
     n = f.shape[0]
     ii, jj = np.indices((n, n))
