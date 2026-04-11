@@ -1,0 +1,112 @@
+============================================================
+2D DEXSY Inversion - Training Pipeline (PyTorch)
+============================================================
+Using device: cuda
+Generating datasets...
+  train: 9500 samples, noisy signal range [0.0000, 1.0821], clean signal range [0.0050, 1.0000], label range [0.0000, 0.6542]
+  val: 400 samples, noisy signal range [0.0016, 1.0799], clean signal range [0.0283, 1.0000], label range [0.0000, 0.5132]
+  test: 100 samples, noisy signal range [0.0008, 1.0553], clean signal range [0.0121, 1.0000], label range [0.0000, 0.5441]
+
+============================================================
+Training and evaluating: attention_unet
+============================================================
+
+Training attention_unet...
+============================================================
+Training samples: 9500
+Validation samples: 400
+Epochs: 60, Batch size: 8
+Epoch   1/60 | Train Loss: 1.394540 | Val Loss: 0.743333 | LR: 5.00e-04 | Time: 56.4s
+Epoch   2/60 | Train Loss: 0.711176 | Val Loss: 0.577617 | LR: 5.00e-04 | Time: 53.9s
+Epoch   3/60 | Train Loss: 0.592192 | Val Loss: 0.457666 | LR: 5.00e-04 | Time: 54.5s
+Epoch   4/60 | Train Loss: 0.511027 | Val Loss: 0.408884 | LR: 5.00e-04 | Time: 54.2s
+Epoch   5/60 | Train Loss: 0.476053 | Val Loss: 0.514484 | LR: 5.00e-04 | Time: 54.4s
+Epoch   6/60 | Train Loss: 0.438333 | Val Loss: 0.375038 | LR: 5.00e-04 | Time: 54.5s
+Epoch   7/60 | Train Loss: 0.437633 | Val Loss: 0.417884 | LR: 5.00e-04 | Time: 54.5s
+Epoch   8/60 | Train Loss: 0.410184 | Val Loss: 0.383753 | LR: 5.00e-04 | Time: 54.6s
+Epoch   9/60 | Train Loss: 0.379958 | Val Loss: 0.503818 | LR: 5.00e-04 | Time: 54.5s
+Epoch  10/60 | Train Loss: 0.386858 | Val Loss: 0.300118 | LR: 5.00e-04 | Time: 54.5s
+Epoch  11/60 | Train Loss: 0.362749 | Val Loss: 0.426437 | LR: 5.00e-04 | Time: 54.7s
+Epoch  12/60 | Train Loss: 0.349570 | Val Loss: 0.328845 | LR: 5.00e-04 | Time: 54.8s
+Epoch  13/60 | Train Loss: 0.349727 | Val Loss: 0.307219 | LR: 5.00e-04 | Time: 53.9s
+Epoch  14/60 | Train Loss: 0.335329 | Val Loss: 0.373487 | LR: 5.00e-04 | Time: 53.4s
+Epoch  15/60 | Train Loss: 0.330775 | Val Loss: 0.260930 | LR: 5.00e-04 | Time: 53.2s
+Epoch  16/60 | Train Loss: 0.330388 | Val Loss: 0.297785 | LR: 5.00e-04 | Time: 52.9s
+Epoch  17/60 | Train Loss: 0.323847 | Val Loss: 0.257408 | LR: 5.00e-04 | Time: 53.7s
+Epoch  18/60 | Train Loss: 0.312534 | Val Loss: 0.250421 | LR: 5.00e-04 | Time: 54.6s
+Epoch  19/60 | Train Loss: 0.312500 | Val Loss: 0.394207 | LR: 5.00e-04 | Time: 54.5s
+Epoch  20/60 | Train Loss: 0.304043 | Val Loss: 0.254338 | LR: 5.00e-04 | Time: 54.3s
+Epoch  21/60 | Train Loss: 0.303313 | Val Loss: 0.282180 | LR: 5.00e-04 | Time: 54.7s
+Epoch  22/60 | Train Loss: 0.296064 | Val Loss: 0.271561 | LR: 5.00e-04 | Time: 54.2s
+Epoch  23/60 | Train Loss: 0.300448 | Val Loss: 0.295649 | LR: 5.00e-04 | Time: 54.5s
+Epoch  24/60 | Train Loss: 0.293406 | Val Loss: 0.255764 | LR: 2.50e-04 | Time: 54.7s
+Epoch  25/60 | Train Loss: 0.244329 | Val Loss: 0.203602 | LR: 2.50e-04 | Time: 54.2s
+Epoch  26/60 | Train Loss: 0.239050 | Val Loss: 0.239239 | LR: 2.50e-04 | Time: 54.3s
+Epoch  27/60 | Train Loss: 0.239168 | Val Loss: 0.274771 | LR: 2.50e-04 | Time: 54.4s
+Epoch  28/60 | Train Loss: 0.233185 | Val Loss: 0.205787 | LR: 2.50e-04 | Time: 54.4s
+Epoch  29/60 | Train Loss: 0.233396 | Val Loss: 0.209353 | LR: 2.50e-04 | Time: 54.5s
+Epoch  30/60 | Train Loss: 0.231981 | Val Loss: 0.199937 | LR: 2.50e-04 | Time: 54.5s
+Epoch  31/60 | Train Loss: 0.238630 | Val Loss: 0.231469 | LR: 2.50e-04 | Time: 54.4s
+Epoch  32/60 | Train Loss: 0.236570 | Val Loss: 0.237313 | LR: 2.50e-04 | Time: 54.4s
+Epoch  33/60 | Train Loss: 0.234999 | Val Loss: 0.246881 | LR: 2.50e-04 | Time: 54.5s
+Epoch  34/60 | Train Loss: 0.230505 | Val Loss: 0.238419 | LR: 2.50e-04 | Time: 54.5s
+Epoch  35/60 | Train Loss: 0.227599 | Val Loss: 0.239286 | LR: 2.50e-04 | Time: 54.5s
+Epoch  36/60 | Train Loss: 0.233850 | Val Loss: 0.186565 | LR: 2.50e-04 | Time: 54.4s
+Epoch  37/60 | Train Loss: 0.228739 | Val Loss: 0.245844 | LR: 2.50e-04 | Time: 54.5s
+Epoch  38/60 | Train Loss: 0.231144 | Val Loss: 0.208915 | LR: 2.50e-04 | Time: 54.5s
+Epoch  39/60 | Train Loss: 0.223420 | Val Loss: 0.226272 | LR: 2.50e-04 | Time: 54.5s
+Epoch  40/60 | Train Loss: 0.228041 | Val Loss: 0.214484 | LR: 2.50e-04 | Time: 54.5s
+Epoch  41/60 | Train Loss: 0.226702 | Val Loss: 0.220219 | LR: 2.50e-04 | Time: 54.5s
+Epoch  42/60 | Train Loss: 0.224799 | Val Loss: 0.184404 | LR: 2.50e-04 | Time: 54.5s
+Epoch  43/60 | Train Loss: 0.223597 | Val Loss: 0.195822 | LR: 2.50e-04 | Time: 54.5s
+Epoch  44/60 | Train Loss: 0.222213 | Val Loss: 0.219782 | LR: 2.50e-04 | Time: 54.5s
+Epoch  45/60 | Train Loss: 0.221334 | Val Loss: 0.241881 | LR: 2.50e-04 | Time: 54.5s
+Epoch  46/60 | Train Loss: 0.218965 | Val Loss: 0.366025 | LR: 2.50e-04 | Time: 54.6s
+Epoch  47/60 | Train Loss: 0.223646 | Val Loss: 0.195130 | LR: 2.50e-04 | Time: 54.5s
+Epoch  48/60 | Train Loss: 0.221656 | Val Loss: 0.240436 | LR: 1.25e-04 | Time: 54.6s
+Epoch  49/60 | Train Loss: 0.194687 | Val Loss: 0.184319 | LR: 1.25e-04 | Time: 54.5s
+Epoch  50/60 | Train Loss: 0.194097 | Val Loss: 0.240613 | LR: 1.25e-04 | Time: 54.5s
+Epoch  51/60 | Train Loss: 0.189128 | Val Loss: 0.184754 | LR: 1.25e-04 | Time: 54.5s
+Epoch  52/60 | Train Loss: 0.189701 | Val Loss: 0.177913 | LR: 1.25e-04 | Time: 54.5s
+Epoch  53/60 | Train Loss: 0.189508 | Val Loss: 0.273648 | LR: 1.25e-04 | Time: 54.6s
+Epoch  54/60 | Train Loss: 0.188186 | Val Loss: 0.190138 | LR: 1.25e-04 | Time: 54.6s
+Epoch  55/60 | Train Loss: 0.189421 | Val Loss: 0.181760 | LR: 1.25e-04 | Time: 54.5s
+Epoch  56/60 | Train Loss: 0.187696 | Val Loss: 0.174712 | LR: 1.25e-04 | Time: 54.5s
+Epoch  57/60 | Train Loss: 0.185850 | Val Loss: 0.180293 | LR: 1.25e-04 | Time: 54.5s
+Epoch  58/60 | Train Loss: 0.186397 | Val Loss: 0.182694 | LR: 1.25e-04 | Time: 54.5s
+Epoch  59/60 | Train Loss: 0.187538 | Val Loss: 0.174358 | LR: 1.25e-04 | Time: 54.5s
+Epoch  60/60 | Train Loss: 0.183412 | Val Loss: 0.175627 | LR: 1.25e-04 | Time: 54.6s
+
+Training completed in 3268.72 seconds
+Saved final model to training_output_2d/checkpoints/attention_unet_20260411_155746/final_model.pt
+
+Evaluating model...
+  MSE: 0.000006 (+/- 0.000013)
+  MAE: 0.000088 (+/- 0.000083)
+  RMSE: 0.002485
+  Signal MSE (clean): 0.000064
+  Signal MSE (noisy): 0.000217
+  DEI MAE: 0.019844
+Saved training history plot to training_output_2d/figures/history_attention_unet.png
+Saved comparison plot to training_output_2d/figures/comparison_attention_unet.png
+
+============================================================
+MODEL COMPARISON SUMMARY
+============================================================
+Model                     MSE             MAE             RMSE           
+------------------------------------------------------------
+attention_unet            0.000006        0.000088        0.002485       
+============================================================
+
+Best model: attention_unet
+
+Evaluating model...
+  MSE: 0.000006 (+/- 0.000013)
+  MAE: 0.000088 (+/- 0.000083)
+  RMSE: 0.002485
+  Signal MSE (clean): 0.000064
+  Signal MSE (noisy): 0.000217
+  DEI MAE: 0.019844
+Saved comparison plot to training_output_2d/figures/final_comparison.png
+
+Training complete!
