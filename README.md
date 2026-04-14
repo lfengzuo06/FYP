@@ -4,7 +4,9 @@ This is a slimmed-down GitHub/Colab-ready version of the project that keeps only
 
 - `improved_2d_dexsy/forward_model_2d.py`
 - `improved_2d_dexsy/model_2d.py`
+- `improved_2d_dexsy/preprocessing_2d.py`
 - `improved_2d_dexsy/train_2d.py`
+- `improved_2d_dexsy/inference_2d.py`
 - `improved_2d_dexsy/generate_forward_figures.py`
 - `checkpoints/attention_unet_best_model.pt`
 - `notebooks/colab_demo.ipynb`
@@ -24,11 +26,35 @@ The bundled checkpoint is the latest trained 2D inverse model and can be loaded 
 │   ├── generate_forward_figures.py
 │   ├── inference_2d.py
 │   ├── model_2d.py
+│   ├── preprocessing_2d.py
 │   └── train_2d.py
 ├── notebooks/
 │   └── colab_demo.ipynb
 └── requirements.txt
 ```
+
+## Stable Inference API
+
+The project now exposes one main prediction entrypoint for interface work:
+
+```python
+from improved_2d_dexsy import predict_from_signal
+
+result = predict_from_signal(signal_64x64)
+print(result.dei)
+print(result.summary_metrics)
+result.figure.show()
+```
+
+`predict_from_signal(signal)` returns:
+
+- `result.reconstructed_spectrum`
+- `result.dei`
+- `result.summary_metrics`
+- `result.figure`
+
+This uses the bundled U-Net checkpoint by default, while still keeping the
+`model_name=` and `checkpoint_path=` hooks needed for future model swapping.
 
 ## Colab Quick Start
 
@@ -51,6 +77,15 @@ That notebook will:
 3. generate a synthetic 2D forward-model sample
 4. run inverse-model prediction
 5. show the saved training curve
+
+You can also run plain Python inference in Colab:
+
+```python
+from improved_2d_dexsy import predict_from_signal
+
+result = predict_from_signal(signal_64x64)
+result.summary_metrics
+```
 
 ## Local Training
 

@@ -19,12 +19,14 @@ from datetime import datetime
 
 try:
     from .forward_model_2d import ForwardModel2D, compute_dei
+    from .preprocessing_2d import build_model_inputs, build_position_channel
     from .model_2d import (
         get_model, AttentionUNet2D, MultiscaleUNet2D,
         PhysicsInformedLoss
     )
 except ImportError:  # pragma: no cover - allows running as a script.
     from forward_model_2d import ForwardModel2D, compute_dei
+    from preprocessing_2d import build_model_inputs, build_position_channel
     from model_2d import (
         get_model, AttentionUNet2D, MultiscaleUNet2D,
         PhysicsInformedLoss
@@ -129,30 +131,14 @@ class TrainingPipeline2D:
 
     def _build_position_channel(self) -> np.ndarray:
         """Build one positional channel from the log-b sampling coordinates."""
-        b1 = self.forward_model.b1.astype(np.float32)
-        b2 = self.forward_model.b2.astype(np.float32)
-        positive = np.concatenate([b1[b1 > 0], b2[b2 > 0]])
-        floor = float(np.min(positive)) if positive.size else 1.0
-        log_b1 = np.log10(np.maximum(b1, floor))
-        log_b2 = np.log10(np.maximum(b2, floor))
-        log_b1 = (log_b1 - log_b1.min()) / (log_b1.max() - log_b1.min() + 1e-8)
-        log_b2 = (log_b2 - log_b2.min()) / (log_b2.max() - log_b2.min() + 1e-8)
-        pos = 0.5 * (log_b1[:, None] + log_b2[None, :])
-        return pos.astype(np.float32)
+        return build_position_channel(self.forward_model)
 
     def _build_model_inputs(self, noisy_signals: np.ndarray) -> np.ndarray:
         """
         Build the paper-style three-channel input:
         raw signal, log signal, and one positional encoding channel.
         """
-        raw = noisy_signals[:, 0]
-        log_signal = np.log(raw + 1e-6)
-        log_min = log_signal.min(axis=(1, 2), keepdims=True)
-        log_max = log_signal.max(axis=(1, 2), keepdims=True)
-        log_signal = (log_signal - log_min) / (log_max - log_min + 1e-8)
-        pos = np.broadcast_to(self.position_channel, raw.shape)
-        stacked = np.stack([raw, log_signal.astype(np.float32), pos], axis=1)
-        return stacked.astype(np.float32)
+        return build_model_inputs(noisy_signals, self.forward_model)
 
     def _generate_split(
         self,
