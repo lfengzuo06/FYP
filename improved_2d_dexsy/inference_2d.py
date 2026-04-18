@@ -9,50 +9,16 @@ from typing import Any
 import numpy as np
 import torch
 
+from .config import (
+    DEFAULT_CHECKPOINTS,
+    DEFAULT_MODEL_NAME,
+    available_models,
+    resolve_checkpoint_path,
+    resolve_repo_root,
+)
 from .forward_model_2d import ForwardModel2D, compute_dei
 from .model_2d import get_model
 from .preprocessing_2d import build_model_inputs, build_position_channel, validate_signal_grid
-
-DEFAULT_MODEL_NAME = "attention_unet"
-DEFAULT_CHECKPOINTS = {
-    "attention_unet": "attention_unet_best_model.pt",
-}
-
-
-def available_models() -> list[str]:
-    """Return the currently supported high-level inference model names."""
-    return sorted(DEFAULT_CHECKPOINTS.keys())
-
-
-def resolve_repo_root() -> Path:
-    """Resolve the repository root from the package location."""
-    return Path(__file__).resolve().parent.parent
-
-
-def resolve_checkpoint_path(
-    checkpoint_path: str | Path | None = None,
-    model_name: str = DEFAULT_MODEL_NAME,
-) -> Path:
-    """
-    Resolve a checkpoint path for the selected model.
-
-    If ``checkpoint_path`` is omitted, the bundled checkpoint in ``checkpoints/``
-    is used. This keeps ``predict_from_signal(signal)`` simple for Colab and
-    local usage while leaving room to swap models later.
-    """
-    if checkpoint_path is not None:
-        path = Path(checkpoint_path)
-        if not path.is_absolute():
-            path = (resolve_repo_root() / path).resolve()
-        return path
-
-    try:
-        filename = DEFAULT_CHECKPOINTS[model_name]
-    except KeyError as exc:
-        raise ValueError(
-            f"Unknown model '{model_name}'. Available models: {available_models()}"
-        ) from exc
-    return resolve_repo_root() / "checkpoints" / filename
 
 
 @dataclass
@@ -65,6 +31,8 @@ class PredictionResult:
     dei: float
     summary_metrics: dict[str, Any]
     metadata: dict[str, Any] = field(default_factory=dict)
+    ground_truth_spectrum: np.ndarray | None = None
+    source_name: str | None = None
     figure: Any | None = None
 
     @property
@@ -191,6 +159,7 @@ class DEXSYInferencePipeline:
         *,
         true_spectrum: np.ndarray | None = None,
         include_figure: bool = True,
+        source_name: str | None = None,
     ) -> PredictionResult:
         """Run the full inference pipeline for one 64x64 DEXSY signal matrix."""
         validated = validate_signal_grid(signal, self.forward_model)
@@ -216,12 +185,82 @@ class DEXSYInferencePipeline:
             dei=float(summary["dei"]),
             summary_metrics=summary,
             metadata=metadata,
+            ground_truth_spectrum=np.asarray(true_spectrum, dtype=np.float32) if true_spectrum is not None else None,
+            source_name=source_name,
             figure=figure,
         )
 
+    def predict_batch_from_signals(
+        self,
+        signals: np.ndarray,
+        *,
+        true_spectra: np.ndarray | None = None,
+        include_figures: bool = False,
+        source_names: list[str] | None = None,
+        batch_size: int = 16,
+    ) -> list[PredictionResult]:
+        """Run batch inference on one or more 64x64 DEXSY signals."""
+        validated = validate_signal_grid(signals, self.forward_model)
+        model_inputs = build_model_inputs(validated, self.forward_model)
+        predictions = predict_distribution(
+            self.model,
+            model_inputs,
+            device=self.device,
+            batch_size=batch_size,
+        )[:, 0]
+
+        if true_spectra is not None:
+            true_array = np.asarray(true_spectra, dtype=np.float32)
+            if true_array.ndim == 4 and true_array.shape[1] == 1:
+                true_array = true_array[:, 0]
+            if true_array.ndim == 2:
+                true_array = true_array[None, :, :]
+            if true_array.shape != predictions.shape:
+                raise ValueError(
+                    "true_spectra must match the batch prediction shape. "
+                    f"Expected {predictions.shape}, got {true_array.shape}."
+                )
+        else:
+            true_array = None
+
+        if source_names is None:
+            source_names = [f"sample_{idx:03d}" for idx in range(len(predictions))]
+
+        results: list[PredictionResult] = []
+        for idx, reconstructed in enumerate(predictions):
+            signal_2d = validated[idx, 0]
+            gt = true_array[idx] if true_array is not None else None
+            summary = self.summarize_prediction(signal_2d, reconstructed, true_spectrum=gt)
+            figure = None
+            if include_figures:
+                figure = self.create_figure(signal_2d, reconstructed, true_spectrum=gt)
+            metadata = {
+                **self.model_metadata,
+                "model_name": self.model_name,
+                "forward_model_grid": {
+                    "n_b": int(self.forward_model.n_b),
+                    "n_d": int(self.forward_model.n_d),
+                },
+                "batch_index": idx,
+            }
+            results.append(
+                PredictionResult(
+                    signal=signal_2d,
+                    model_inputs=model_inputs[idx],
+                    reconstructed_spectrum=reconstructed,
+                    dei=float(summary["dei"]),
+                    summary_metrics=summary,
+                    metadata=metadata,
+                    ground_truth_spectrum=gt,
+                    source_name=source_names[idx],
+                    figure=figure,
+                )
+            )
+        return results
+
 
 def load_trained_model(
-    checkpoint_path: str | Path,
+    checkpoint_path,
     device: torch.device | str | None = None,
     model_name: str = DEFAULT_MODEL_NAME,
 ):
@@ -287,12 +326,13 @@ def predict_distribution(
 def predict_from_signal(
     signal: np.ndarray,
     *,
-    checkpoint_path: str | Path | None = None,
+    checkpoint_path=None,
     model_name: str = DEFAULT_MODEL_NAME,
     device: torch.device | str | None = None,
     forward_model: ForwardModel2D | None = None,
     true_spectrum: np.ndarray | None = None,
     include_figure: bool = True,
+    source_name: str | None = None,
 ) -> PredictionResult:
     """
     High-level inference entrypoint for one 64x64 DEXSY signal matrix.
@@ -312,4 +352,33 @@ def predict_from_signal(
         signal,
         true_spectrum=true_spectrum,
         include_figure=include_figure,
+        source_name=source_name,
+    )
+
+
+def predict_batch_from_signals(
+    signals: np.ndarray,
+    *,
+    checkpoint_path=None,
+    model_name: str = DEFAULT_MODEL_NAME,
+    device: torch.device | str | None = None,
+    forward_model: ForwardModel2D | None = None,
+    true_spectra: np.ndarray | None = None,
+    include_figures: bool = False,
+    source_names: list[str] | None = None,
+    batch_size: int = 16,
+) -> list[PredictionResult]:
+    """High-level batch inference entrypoint for one or more DEXSY signals."""
+    pipeline = DEXSYInferencePipeline(
+        model_name=model_name,
+        checkpoint_path=checkpoint_path,
+        device=device,
+        forward_model=forward_model,
+    )
+    return pipeline.predict_batch_from_signals(
+        signals,
+        true_spectra=true_spectra,
+        include_figures=include_figures,
+        source_names=source_names,
+        batch_size=batch_size,
     )
