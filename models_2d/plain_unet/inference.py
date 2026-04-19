@@ -42,6 +42,7 @@ class PredictionResult:
     summary_metrics: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
     ground_truth_spectrum: np.ndarray | None = None
+    source_name: str | None = None
     figure: Any | None = None
 
     @property
@@ -246,6 +247,7 @@ class InferencePipeline:
         *,
         true_spectrum: np.ndarray | None = None,
         include_figure: bool = True,
+        source_name: str | None = None,
     ) -> PredictionResult:
         """
         Run inference on a single 64x64 DEXSY signal.
@@ -254,6 +256,7 @@ class InferencePipeline:
             signal: Input signal array (64x64)
             true_spectrum: Optional ground truth for metrics computation
             include_figure: Whether to generate a visualization
+            source_name: Optional source name
 
         Returns:
             PredictionResult with spectrum, DEI, metrics, and optional figure
@@ -277,6 +280,7 @@ class InferencePipeline:
             summary_metrics=summary,
             metadata={**self.model_metadata},
             ground_truth_spectrum=np.asarray(true_spectrum, dtype=np.float32) if true_spectrum is not None else None,
+            source_name=source_name,
             figure=figure,
         )
 
@@ -285,6 +289,7 @@ class InferencePipeline:
         signals: np.ndarray,
         *,
         true_spectra: np.ndarray | None = None,
+        source_names: list[str] | None = None,
         include_figures: bool = False,
         batch_size: int = 16,
     ) -> list[PredictionResult]:
@@ -294,6 +299,7 @@ class InferencePipeline:
         Args:
             signals: Input signals array (N, 64, 64) or (N, 1, 64, 64)
             true_spectra: Optional ground truths for metrics
+            source_names: Optional source names for each signal
             include_figures: Whether to generate visualizations
             batch_size: Batch size for inference
 
@@ -310,6 +316,9 @@ class InferencePipeline:
                 true_array = true_array[:, 0]
         else:
             true_array = None
+
+        if source_names is None:
+            source_names = [f"sample_{idx:03d}" for idx in range(len(predictions))]
 
         results = []
         for idx, reconstructed in enumerate(predictions):
@@ -328,6 +337,7 @@ class InferencePipeline:
                 summary_metrics=summary,
                 metadata={**self.model_metadata, "batch_index": idx},
                 ground_truth_spectrum=gt,
+                source_name=source_names[idx] if idx < len(source_names) else None,
                 figure=figure,
             ))
 
@@ -342,6 +352,7 @@ def predict(
     forward_model: ForwardModel2D | None = None,
     true_spectrum: np.ndarray | None = None,
     include_figure: bool = True,
+    source_name: str | None = None,
 ) -> PredictionResult:
     """
     High-level inference function for Plain U-Net.
@@ -353,6 +364,7 @@ def predict(
         forward_model: Optional ForwardModel2D instance
         true_spectrum: Optional ground truth for metrics
         include_figure: Whether to generate visualization
+        source_name: Optional source name
 
     Returns:
         PredictionResult with prediction details
@@ -366,6 +378,7 @@ def predict(
         signal,
         true_spectrum=true_spectrum,
         include_figure=include_figure,
+        source_name=source_name,
     )
 
 
@@ -375,6 +388,7 @@ def predict_batch(
     checkpoint_path: str | Path | None = None,
     device: str | None = None,
     true_spectra: np.ndarray | None = None,
+    source_names: list[str] | None = None,
     include_figures: bool = False,
     batch_size: int = 16,
 ) -> list[PredictionResult]:
@@ -386,6 +400,7 @@ def predict_batch(
         checkpoint_path: Optional checkpoint path
         device: Device to use
         true_spectra: Optional ground truths for metrics
+        source_names: Optional source names for each signal
         include_figures: Whether to generate visualizations
         batch_size: Batch size for inference
 
@@ -399,6 +414,7 @@ def predict_batch(
     return pipeline.predict_batch(
         signals,
         true_spectra=true_spectra,
+        source_names=source_names,
         include_figures=include_figures,
         batch_size=batch_size,
     )

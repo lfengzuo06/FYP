@@ -20,6 +20,7 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "outputs" / "inference"
 DEFAULT_MODEL_NAME = "attention_unet"
 DEFAULT_CHECKPOINTS = {
     "attention_unet": "attention_unet_best_model_20260411_155746.pt",
+    "plain_unet": "plain_unet/checkpoints_20260419_184905/best_model.pt",
 }
 
 
