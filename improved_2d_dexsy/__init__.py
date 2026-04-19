@@ -37,11 +37,10 @@ from dexsy_core.preprocessing import (
     validate_signal_grid,
 )
 
-# Re-export from models_2d for backwards compatibility
+# Import individual model inference pipelines
+from models_2d.attention_unet.inference import InferencePipeline as AttentionInferencePipeline
 from models_2d.attention_unet import (
     AttentionUNet2D,
-    InferencePipeline as DEXSYInferencePipeline,
-    InferencePipeline,
     PhysicsInformedLoss,
     predict as predict_from_signal,
     predict_batch as predict_batch_from_signals,
@@ -51,15 +50,163 @@ from models_2d.attention_unet.model import get_model as get_attention_model
 from models_2d.attention_unet.inference import load_trained_model
 
 # Re-export Plain U-Net
+from models_2d.plain_unet.inference import InferencePipeline as PlainInferencePipeline
 from models_2d.plain_unet import (
     PlainUNet2D,
-    InferencePipeline as PlainInferencePipeline,
     PlainUNetLoss,
     predict as predict_plain_unet,
     predict_batch as predict_batch_plain_unet,
     train_model as train_plain_unet,
 )
 from models_2d.plain_unet.model import get_model as get_plain_model
+
+
+class DEXSYInferencePipeline:
+    """
+    Unified inference pipeline that supports multiple model types.
+
+    This class wraps the model-specific inference pipelines and provides
+    a consistent interface with model_name dispatching.
+
+    Args:
+        model_name: Model type ('attention_unet' or 'plain_unet')
+        checkpoint_path: Path to model checkpoint
+        device: Device to use ('cuda', 'cpu', or None for auto)
+        forward_model: ForwardModel2D instance
+    """
+
+    _MODEL_REGISTRY = {
+        "attention_unet": AttentionInferencePipeline,
+        "plain_unet": PlainInferencePipeline,
+    }
+
+    def __init__(
+        self,
+        model_name: str = "attention_unet",
+        checkpoint_path: str | Path | None = None,
+        device: str | None = None,
+        forward_model: ForwardModel2D | None = None,
+    ):
+        if model_name not in self._MODEL_REGISTRY:
+            raise ValueError(
+                f"Unknown model '{model_name}'. Available models: {list(self._MODEL_REGISTRY.keys())}"
+            )
+
+        pipeline_class = self._MODEL_REGISTRY[model_name]
+        self._pipeline = pipeline_class(
+            checkpoint_path=checkpoint_path,
+            device=device,
+            forward_model=forward_model,
+        )
+        self._model_name = model_name
+
+    def predict(
+        self,
+        signal,
+        *,
+        true_spectrum=None,
+        include_figure=True,
+        source_name=None,
+        **kwargs,
+    ):
+        """Delegate to the underlying pipeline's predict method."""
+        return self._pipeline.predict(
+            signal,
+            true_spectrum=true_spectrum,
+            include_figure=include_figure,
+            source_name=source_name,
+            **kwargs,
+        )
+
+    def predict_batch(
+        self,
+        signals,
+        *,
+        true_spectra=None,
+        source_names=None,
+        include_figures=False,
+        batch_size=16,
+        **kwargs,
+    ):
+        """Delegate to the underlying pipeline's predict_batch method."""
+        return self._pipeline.predict_batch(
+            signals,
+            true_spectra=true_spectra,
+            source_names=source_names,
+            include_figures=include_figures,
+            batch_size=batch_size,
+            **kwargs,
+        )
+
+    def predict_batch_from_signals(
+        self,
+        signals,
+        *,
+        true_spectra=None,
+        source_names=None,
+        include_figures=False,
+        batch_size=16,
+        **kwargs,
+    ):
+        """Alias for predict_batch (backwards compatibility)."""
+        return self.predict_batch(
+            signals,
+            true_spectra=true_spectra,
+            source_names=source_names,
+            include_figures=include_figures,
+            batch_size=batch_size,
+            **kwargs,
+        )
+
+    def predict_from_signal(
+        self,
+        signal,
+        *,
+        true_spectrum=None,
+        include_figure=True,
+        source_name=None,
+        **kwargs,
+    ):
+        """Alias for predict (backwards compatibility)."""
+        return self.predict(
+            signal,
+            true_spectrum=true_spectrum,
+            include_figure=include_figure,
+            source_name=source_name,
+            **kwargs,
+        )
+
+    @property
+    def model_name(self) -> str:
+        """Return the model name."""
+        return self._model_name
+
+    def get_model_name(self) -> str:
+        """Return the model name (for interface compatibility)."""
+        return self._pipeline.get_model_name()
+
+    def get_model_info(self) -> dict:
+        """Return model information."""
+        return self._pipeline.get_model_info()
+
+    @property
+    def forward_model(self) -> ForwardModel2D:
+        """Return the forward model (for interface compatibility)."""
+        return self._pipeline.forward_model
+
+    @property
+    def device(self):
+        """Return the device (for interface compatibility)."""
+        return self._pipeline.device
+
+    @property
+    def model(self):
+        """Return the underlying model (for interface compatibility)."""
+        return self._pipeline.model
+
+
+# Alias InferencePipeline for backwards compatibility
+InferencePipeline = DEXSYInferencePipeline
 
 # Re-export from benchmarks_2d for convenience
 from benchmarks_2d import ILTInferencePipeline
