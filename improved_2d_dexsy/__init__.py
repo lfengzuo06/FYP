@@ -37,6 +37,12 @@ from dexsy_core.preprocessing import (
     validate_signal_grid,
 )
 
+# Import ILT baseline
+from benchmarks_2d.ilt_baseline import (
+    ILTInferencePipeline,
+    predict_ilt,
+)
+
 # Import individual model inference pipelines
 from models_2d.attention_unet.inference import InferencePipeline as AttentionInferencePipeline
 from models_2d.attention_unet import (
@@ -60,6 +66,15 @@ from models_2d.plain_unet import (
 )
 from models_2d.plain_unet.model import get_model as get_plain_model
 
+# Import Deep Unfolding
+from models_2d.deep_unfolding.inference import InferencePipeline as DeepUnfoldingInferencePipeline
+from models_2d.deep_unfolding.model import (
+    DeepUnfolding2D,
+    get_model as get_deep_unfolding_model,
+)
+from models_2d.deep_unfolding import inference as deep_unfolding_inference
+from models_2d.deep_unfolding import train as deep_unfolding_train
+
 
 class DEXSYInferencePipeline:
     """
@@ -69,15 +84,18 @@ class DEXSYInferencePipeline:
     a consistent interface with model_name dispatching.
 
     Args:
-        model_name: Model type ('attention_unet' or 'plain_unet')
-        checkpoint_path: Path to model checkpoint
+        model_name: Model type ('attention_unet', 'plain_unet', 'deep_unfolding', or '2d_ilt')
+        checkpoint_path: Path to model checkpoint (not needed for ILT)
         device: Device to use ('cuda', 'cpu', or None for auto)
         forward_model: ForwardModel2D instance
+        alpha: ILT regularization parameter (only for 2d_ilt)
     """
 
     _MODEL_REGISTRY = {
         "attention_unet": AttentionInferencePipeline,
         "plain_unet": PlainInferencePipeline,
+        "deep_unfolding": DeepUnfoldingInferencePipeline,
+        "2d_ilt": ILTInferencePipeline,
     }
 
     def __init__(
@@ -86,6 +104,7 @@ class DEXSYInferencePipeline:
         checkpoint_path: str | Path | None = None,
         device: str | None = None,
         forward_model: ForwardModel2D | None = None,
+        alpha: float = 0.02,
     ):
         if model_name not in self._MODEL_REGISTRY:
             raise ValueError(
@@ -93,11 +112,19 @@ class DEXSYInferencePipeline:
             )
 
         pipeline_class = self._MODEL_REGISTRY[model_name]
-        self._pipeline = pipeline_class(
-            checkpoint_path=checkpoint_path,
-            device=device,
-            forward_model=forward_model,
-        )
+
+        # ILT doesn't need checkpoint_path
+        if model_name == "2d_ilt":
+            self._pipeline = pipeline_class(
+                alpha=alpha,
+                forward_model=forward_model,
+            )
+        else:
+            self._pipeline = pipeline_class(
+                checkpoint_path=checkpoint_path,
+                device=device,
+                forward_model=forward_model,
+            )
         self._model_name = model_name
 
     def predict(
@@ -110,6 +137,14 @@ class DEXSYInferencePipeline:
         **kwargs,
     ):
         """Delegate to the underlying pipeline's predict method."""
+        # ILT doesn't use true_spectrum
+        if self._model_name == "2d_ilt":
+            return self._pipeline.predict(
+                signal,
+                include_figure=include_figure,
+                source_name=source_name,
+                **kwargs,
+            )
         return self._pipeline.predict(
             signal,
             true_spectrum=true_spectrum,
@@ -129,6 +164,14 @@ class DEXSYInferencePipeline:
         **kwargs,
     ):
         """Delegate to the underlying pipeline's predict_batch method."""
+        # ILT doesn't use true_spectra
+        if self._model_name == "2d_ilt":
+            return self._pipeline.predict_batch(
+                signals,
+                source_names=source_names,
+                include_figures=include_figures,
+                **kwargs,
+            )
         return self._pipeline.predict_batch(
             signals,
             true_spectra=true_spectra,

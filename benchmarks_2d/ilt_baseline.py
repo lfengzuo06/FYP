@@ -36,6 +36,7 @@ class ILTPredictionResult:
     inference_time: float
     summary_metrics: dict[str, Any] = field(default_factory=dict)
     metadata: dict[str, Any] = field(default_factory=dict)
+    ground_truth_spectrum: np.ndarray | None = None
     figure: Any | None = None
 
 
@@ -93,6 +94,7 @@ class ILTInferencePipeline:
         signal: np.ndarray,
         *,
         include_figure: bool = True,
+        source_name: str | None = None,
     ) -> ILTPredictionResult:
         """
         Run 2D ILT on a single 64x64 DEXSY signal.
@@ -100,6 +102,7 @@ class ILTInferencePipeline:
         Args:
             signal: Input signal array (64x64)
             include_figure: Whether to generate visualization
+            source_name: Optional source name
 
         Returns:
             ILTPredictionResult with spectrum, DEI, timing, and optional figure
@@ -141,7 +144,7 @@ class ILTInferencePipeline:
             dei=float(dei),
             inference_time=float(inference_time),
             summary_metrics=summary,
-            metadata=self.get_model_info(),
+            metadata={**self.get_model_info(), "source_name": source_name},
             figure=figure,
         )
 
@@ -149,6 +152,7 @@ class ILTInferencePipeline:
         self,
         signals: np.ndarray,
         *,
+        source_names: list[str] | None = None,
         include_figures: bool = False,
     ) -> list[ILTPredictionResult]:
         """
@@ -156,12 +160,16 @@ class ILTInferencePipeline:
 
         Args:
             signals: Input signals (N, 64, 64) or (N, 1, 64, 64)
+            source_names: Optional source names for each signal
             include_figures: Whether to generate visualizations
 
         Returns:
             List of ILTPredictionResult objects
         """
         validated = validate_signal_grid(signals, self.forward_model)
+
+        if source_names is None:
+            source_names = [f"sample_{idx:03d}" for idx in range(len(validated))]
 
         results = []
         for idx in range(len(validated)):
@@ -192,8 +200,9 @@ class ILTInferencePipeline:
                 summary_metrics={
                     "inference_time_seconds": float(inference_time),
                     "dei": float(dei),
+                    "source_name": source_names[idx] if idx < len(source_names) else None,
                 },
-                metadata=self.get_model_info(),
+                metadata={**self.get_model_info(), "source_name": source_names[idx] if idx < len(source_names) else None},
                 figure=figure,
             ))
 

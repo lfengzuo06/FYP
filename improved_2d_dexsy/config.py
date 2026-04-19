@@ -21,6 +21,8 @@ DEFAULT_MODEL_NAME = "attention_unet"
 DEFAULT_CHECKPOINTS = {
     "attention_unet": "attention_unet_best_model_20260411_155746.pt",
     "plain_unet": "plain_unet/checkpoints_20260419_184905/best_model.pt",
+    "deep_unfolding": None,  # Not trained yet, will be set after training
+    "2d_ilt": None,  # ILT doesn't require a checkpoint
 }
 
 
@@ -40,7 +42,7 @@ def list_available_checkpoints(checkpoints_dir: str | Path | None = None) -> lis
 def resolve_checkpoint_path(
     checkpoint_path: str | Path | None = None,
     model_name: str = DEFAULT_MODEL_NAME,
-) -> Path:
+) -> Path | None:
     """Resolve an explicit or bundled checkpoint path."""
     if checkpoint_path is not None:
         path = Path(checkpoint_path)
@@ -48,12 +50,18 @@ def resolve_checkpoint_path(
             path = (REPO_ROOT / path).resolve()
         return path
 
+    # ILT doesn't need a checkpoint
+    if model_name == "2d_ilt":
+        return None
+
     try:
         filename = DEFAULT_CHECKPOINTS[model_name]
     except KeyError as exc:
         raise ValueError(
             f"Unknown model '{model_name}'. Available models: {available_models()}"
         ) from exc
+    if filename is None:
+        return None  # e.g., 2d_ilt
     return CHECKPOINTS_DIR / filename
 
 
