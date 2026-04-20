@@ -457,7 +457,10 @@ def train_model(
     # Verify a forward pass with sample data
     model.eval()
     with torch.no_grad():
-        sample_input = torch.randn(2, 1, 64, 64).to(device)
+        if model_type == "fno":
+            sample_input = torch.randn(2, 3, 64, 64).to(device)
+        else:
+            sample_input = torch.randn(2, 1, 64, 64).to(device)
         sample_output = model(sample_input)
         print(f"  Sample output range: [{sample_output.min().item():.6f}, {sample_output.max().item():.6f}]")
     model.train()
@@ -517,10 +520,11 @@ def train_model(
             else:
                 # FNO takes 3-channel input
                 model_input = inputs
+            signal_for_loss = inputs[:, 0:1]
 
             optimizer.zero_grad()
             predictions = model(model_input)
-            losses = criterion(predictions, labels, model_input)
+            losses = criterion(predictions, labels, signal_for_loss)
             loss = losses['total']
 
             loss.backward()
@@ -545,9 +549,10 @@ def train_model(
                     model_input = inputs[:, 0:1]
                 else:
                     model_input = inputs
+                signal_for_loss = inputs[:, 0:1]
 
                 predictions = model(model_input)
-                losses = criterion(predictions, labels, model_input)
+                losses = criterion(predictions, labels, signal_for_loss)
                 val_loss += losses['total'].item()
 
         val_loss /= len(val_loader)
@@ -610,9 +615,10 @@ def train_model(
                 model_input = inputs[:, 0:1]
             else:
                 model_input = inputs
+            signal_for_loss = inputs[:, 0:1]
 
             predictions = model(model_input)
-            losses = criterion(predictions, labels, model_input)
+            losses = criterion(predictions, labels, signal_for_loss)
             test_loss += losses['total'].item()
 
             # Compute DEI on predictions
