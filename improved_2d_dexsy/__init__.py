@@ -75,6 +75,17 @@ from models_2d.deep_unfolding.model import (
 from models_2d.deep_unfolding import inference as deep_unfolding_inference
 from models_2d.deep_unfolding import train as deep_unfolding_train
 
+# Import Neural Operators
+from models_2d.neural_operators.inference import InferencePipeline as NeuralOpInferencePipeline
+from models_2d.neural_operators.model import (
+    DeepONet2D,
+    FNO2D,
+    get_deeponet_model,
+    get_fno_model,
+)
+from models_2d.neural_operators import train as neural_op_train
+from models_2d.neural_operators import inference as neural_op_inference
+
 
 class DEXSYInferencePipeline:
     """
@@ -84,17 +95,21 @@ class DEXSYInferencePipeline:
     a consistent interface with model_name dispatching.
 
     Args:
-        model_name: Model type ('attention_unet', 'plain_unet', 'deep_unfolding', or '2d_ilt')
+        model_name: Model type ('attention_unet', 'plain_unet', 'deep_unfolding',
+                    'deeponet', 'fno', or '2d_ilt')
         checkpoint_path: Path to model checkpoint (not needed for ILT)
         device: Device to use ('cuda', 'cpu', or None for auto)
         forward_model: ForwardModel2D instance
         alpha: ILT regularization parameter (only for 2d_ilt)
+        model_type: Neural operator type ('deeponet' or 'fno', only for neural operators)
     """
 
     _MODEL_REGISTRY = {
         "attention_unet": AttentionInferencePipeline,
         "plain_unet": PlainInferencePipeline,
         "deep_unfolding": DeepUnfoldingInferencePipeline,
+        "deeponet": NeuralOpInferencePipeline,
+        "fno": NeuralOpInferencePipeline,
         "2d_ilt": ILTInferencePipeline,
     }
 
@@ -105,6 +120,7 @@ class DEXSYInferencePipeline:
         device: str | None = None,
         forward_model: ForwardModel2D | None = None,
         alpha: float = 0.02,
+        model_type: str | None = None,  # For neural operators
     ):
         if model_name not in self._MODEL_REGISTRY:
             raise ValueError(
@@ -117,6 +133,20 @@ class DEXSYInferencePipeline:
         if model_name == "2d_ilt":
             self._pipeline = pipeline_class(
                 alpha=alpha,
+                forward_model=forward_model,
+            )
+        # Neural operators need model_type parameter
+        elif model_name in ("deeponet", "fno"):
+            if model_type is not None and model_type != model_name:
+                raise ValueError(
+                    f"model_name='{model_name}' is incompatible with model_type='{model_type}'. "
+                    "Use matching values, or omit model_type."
+                )
+            resolved_model_type = model_name if model_type is None else model_type
+            self._pipeline = pipeline_class(
+                model_type=resolved_model_type,
+                checkpoint_path=checkpoint_path,
+                device=device,
                 forward_model=forward_model,
             )
         else:

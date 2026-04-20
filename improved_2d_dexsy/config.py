@@ -22,6 +22,8 @@ DEFAULT_CHECKPOINTS = {
     "attention_unet": "attention_unet_best_model_20260411_155746.pt",
     "plain_unet": "plain_unet/checkpoints_20260419_185116/best_model.pt",
     "deep_unfolding": "deep_unfolding/run_fixed_v1/best_model.pt",
+    "deeponet": None,  # Not trained yet
+    "fno": None,  # Not trained yet
     "2d_ilt": None,  # ILT doesn't require a checkpoint
 }
 
