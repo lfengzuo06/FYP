@@ -2,7 +2,7 @@
 DeepONet (Deep Operator Network) for 2D DEXSY Inversion.
 
 DeepONet learns to map functions (operators) to functions. In our context:
-- Branch Net: Takes the input signal s as a fixed-dimensional vector
+- Branch Net: Takes the input signal as a fixed-dimensional vector
 - Trunk Net: Takes the spatial coordinates (D1, D2 grid) as input
 - Output: Predicted spectrum value at each grid point
 
@@ -27,7 +27,6 @@ class BranchNet(nn.Module):
         self,
         input_dim: int = 64 * 64,  # Flattened signal size
         hidden_dims: list[int] | None = None,
-        use_batch_norm: bool = False,
     ):
         super().__init__()
         if hidden_dims is None:
@@ -35,19 +34,30 @@ class BranchNet(nn.Module):
 
         self.input_dim = input_dim
         self.output_dim = hidden_dims[-1]
-        self.use_batch_norm = use_batch_norm
 
         layers = []
         prev_dim = input_dim
 
-        for i, dim in enumerate(hidden_dims):
-            layers.append(nn.Linear(prev_dim, dim))
-            # Use LayerNorm instead of BatchNorm for stability with small batches
-            layers.append(nn.LayerNorm(dim))
-            layers.append(nn.ReLU())
+        for dim in hidden_dims:
+            layers.extend([
+                nn.Linear(prev_dim, dim),
+                nn.LayerNorm(dim),
+                nn.ReLU(),
+            ])
             prev_dim = dim
 
         self.network = nn.Sequential(*layers)
+
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize weights with Xavier for better training."""
+        for module in self.network.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -87,13 +97,26 @@ class TrunkNet(nn.Module):
         prev_dim = input_dim
 
         for dim in hidden_dims:
-            layers.append(nn.Linear(prev_dim, dim))
-            layers.append(nn.LayerNorm(dim))
-            layers.append(nn.ReLU())
+            layers.extend([
+                nn.Linear(prev_dim, dim),
+                nn.LayerNorm(dim),
+                nn.ReLU(),
+            ])
             prev_dim = dim
 
         layers.append(nn.Linear(prev_dim, output_dim))
         self.network = nn.Sequential(*layers)
+
+        # Initialize weights
+        self._init_weights()
+
+    def _init_weights(self):
+        """Initialize weights with Xavier for better training."""
+        for module in self.network.modules():
+            if isinstance(module, nn.Linear):
+                nn.init.xavier_uniform_(module.weight)
+                if module.bias is not None:
+                    nn.init.zeros_(module.bias)
 
     def forward(self, coords: torch.Tensor) -> torch.Tensor:
         """
@@ -148,7 +171,11 @@ class DeepONet2D(nn.Module):
             output_dim=output_dim,
         )
 
-        # Output bias for each grid point
+        # Output scaling factor - log parameterization for positivity and stability
+        self.log_scale = nn.Parameter(torch.tensor(-4.0))  # exp(-4) ≈ 0.018
+
+        # Output bias - initialize to reasonable values for normalized spectra
+        # Since scale is small initially, set bias to produce output ~ 0.1-0.5
         self.bias = nn.Parameter(torch.zeros(1, grid_size * grid_size, 1))
 
     def forward(self, signal: torch.Tensor) -> torch.Tensor:
@@ -174,8 +201,10 @@ class DeepONet2D(nn.Module):
         # Trunk network: process coordinates
         trunk_out = self.trunk(coords)  # [B, H*W, output_dim]
 
-        # Dot product: branch · trunk + bias
-        output = torch.sum(branch_out * trunk_out, dim=-1, keepdim=True)  # [B, H*W, 1]
+        # Dot product: exp(log_scale) * (branch · trunk) + bias
+        # Scale is log-parameterized for stability
+        scale = torch.exp(self.log_scale)
+        output = scale * torch.sum(branch_out * trunk_out, dim=-1, keepdim=True)  # [B, H*W, 1]
         output = output + self.bias  # [B, H*W, 1]
 
         # Apply non-negative activation
