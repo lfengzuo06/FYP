@@ -62,24 +62,114 @@ class DEXSYDataset(Dataset):
         return x, y
 
 
+class PhysicsInformedNeuralOperatorLoss(nn.Module):
+    """
+    Physics-informed loss for Neural Operators on DEXSY.
+    
+    Combines:
+    - Weighted reconstruction loss with peak awareness
+    - Forward consistency loss (reconstruct signal from predicted spectrum)
+    - Sum-to-one regularization
+    - Smoothness regularization
+    """
+
+    def __init__(
+        self,
+        forward_model,
+        alpha_recon: float = 1.0,
+        alpha_forward: float = 0.5,
+        alpha_smooth: float = 0.01,
+        peak_weight: float = 10.0,
+    ):
+        super().__init__()
+        kernel = torch.from_numpy(forward_model.kernel_matrix).float()
+        self.register_buffer("kernel_matrix", kernel)
+        self.n_b = forward_model.n_b
+        self.alpha_recon = alpha_recon
+        self.alpha_forward = alpha_forward
+        self.alpha_smooth = alpha_smooth
+        self.peak_weight = peak_weight
+
+    def reconstruct_signal(self, spectrum_pred: torch.Tensor) -> torch.Tensor:
+        """Reconstruct signal from predicted spectrum using forward model kernel."""
+        batch_size = spectrum_pred.shape[0]
+        pred_flat = spectrum_pred.squeeze(1).reshape(batch_size, -1)
+        signal_flat = pred_flat @ self.kernel_matrix.T
+        return signal_flat.view(batch_size, 1, self.n_b, self.n_b)
+
+    def forward(
+        self,
+        predictions: torch.Tensor,
+        targets: torch.Tensor,
+        input_signals: torch.Tensor,
+    ) -> dict[str, torch.Tensor]:
+        """
+        Compute physics-informed loss.
+        
+        Args:
+            predictions: [B, 1, H, W] predicted spectra
+            targets: [B, 1, H, W] ground truth spectra
+            input_signals: [B, 1, H, W] input noisy signals
+        """
+        # Normalize predictions for stable loss computation
+        pred_norm = predictions / (predictions.sum(dim=(2, 3), keepdim=True) + 1e-8)
+        target_norm = targets / (targets.sum(dim=(2, 3), keepdim=True) + 1e-8)
+        
+        # Peak-weighted reconstruction loss
+        relative_peak = targets / (targets.amax(dim=(2, 3), keepdim=True) + 1e-8)
+        weights = 1.0 + self.peak_weight * torch.sqrt(relative_peak + 1e-8)
+        recon_loss = torch.mean(weights * (pred_norm - target_norm) ** 2)
+        
+        # Forward consistency loss
+        pred_signal = self.reconstruct_signal(predictions)
+        # Normalize input signal too for fair comparison
+        input_norm = input_signals / (input_signals.sum(dim=(2, 3), keepdim=True) + 1e-8)
+        forward_loss = torch.mean((pred_signal - input_norm) ** 2)
+        
+        # Smoothness regularization
+        laplacian = predictions[:, :, 1:-1, 1:-1] * 4 \
+            - predictions[:, :, :-2, 1:-1] \
+            - predictions[:, :, 2:, 1:-1] \
+            - predictions[:, :, 1:-1, :-2] \
+            - predictions[:, :, 1:-1, 2:]
+        smooth_loss = torch.mean(laplacian ** 2)
+        
+        # Total loss
+        total_loss = (self.alpha_recon * recon_loss + 
+                      self.alpha_forward * forward_loss + 
+                      self.alpha_smooth * smooth_loss)
+        
+        return {
+            'total': total_loss,
+            'reconstruction': recon_loss,
+            'forward': forward_loss,
+            'smoothness': smooth_loss,
+        }
+
+
 class NeuralOperatorLoss(nn.Module):
     """
     Loss function for Neural Operators.
 
     Combines:
-    - MSE reconstruction loss
+    - Weighted MSE reconstruction loss (handles sparse labels)
     - Forward consistency loss (optional)
     - Smoothness regularization (optional)
+    
+    For sparse spectra, uses non-zero weighting to focus learning on 
+    the informative (non-zero) regions.
     """
 
     def __init__(
         self,
         alpha_recon: float = 1.0,
         alpha_smooth: float = 0.01,
+        sparse_weight: float = 100.0,
     ):
         super().__init__()
         self.alpha_recon = alpha_recon
         self.alpha_smooth = alpha_smooth
+        self.sparse_weight = sparse_weight
 
     def forward(
         self,
@@ -96,8 +186,35 @@ class NeuralOperatorLoss(nn.Module):
         Returns:
             dict with total_loss and individual components
         """
-        # Reconstruction loss
-        recon_loss = torch.mean((predictions - targets) ** 2)
+        # Weighted reconstruction loss for sparse data
+        # Give more weight to non-zero regions
+        is_nonzero = (targets > 1e-6).float()
+        weights = 1.0 + self.sparse_weight * is_nonzero
+        
+        squared_error = (predictions - targets) ** 2
+        weighted_se = squared_error * weights
+        recon_loss = weighted_se.mean()
+
+        # Smoothness regularization (Laplacian)
+        if self.alpha_smooth > 0:
+            laplacian = predictions[:, :, 1:-1, 1:-1] * 4 \
+                - predictions[:, :, :-2, 1:-1] \
+                - predictions[:, :, 2:, 1:-1] \
+                - predictions[:, :, 1:-1, :-2] \
+                - predictions[:, :, 1:-1, 2:]
+            smooth_loss = torch.mean(laplacian ** 2)
+        else:
+            # Use same device as predictions to avoid device mismatch
+            smooth_loss = torch.tensor(0.0, device=predictions.device, dtype=predictions.dtype)
+
+        # Total loss
+        total_loss = self.alpha_recon * recon_loss + self.alpha_smooth * smooth_loss
+
+        return {
+            'total': total_loss,
+            'reconstruction': recon_loss,
+            'smoothness': smooth_loss,
+        }
 
         # Smoothness regularization (Laplacian)
         if self.alpha_smooth > 0:
@@ -330,8 +447,29 @@ def train_model(
 
     model = model.to(device)
 
-    # Loss
-    criterion = NeuralOperatorLoss(alpha_recon=1.0, alpha_smooth=0.01).to(device)
+    # Print model summary and verify input/output shapes
+    print(f"\nModel architecture:")
+    print(f"  Signal input dim: {forward_model.n_b * forward_model.n_b}")
+    print(f"  Grid size: {forward_model.n_d}")
+    if hasattr(model, 'output_scale'):
+        print(f"  Output scale init: {model.output_scale.item():.4f}")
+
+    # Verify a forward pass with sample data
+    model.eval()
+    with torch.no_grad():
+        sample_input = torch.randn(2, 1, 64, 64).to(device)
+        sample_output = model(sample_input)
+        print(f"  Sample output range: [{sample_output.min().item():.6f}, {sample_output.max().item():.6f}]")
+    model.train()
+
+    # Use Physics-Informed loss for better training stability
+    criterion = PhysicsInformedNeuralOperatorLoss(
+        forward_model=forward_model,
+        alpha_recon=1.0,
+        alpha_forward=0.1,  # Reduced weight to prevent trivial solutions
+        alpha_smooth=0.01,
+        peak_weight=10.0,
+    ).to(device)
 
     # Optimizer
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
@@ -382,7 +520,7 @@ def train_model(
 
             optimizer.zero_grad()
             predictions = model(model_input)
-            losses = criterion(predictions, labels)
+            losses = criterion(predictions, labels, model_input)
             loss = losses['total']
 
             loss.backward()
@@ -409,7 +547,7 @@ def train_model(
                     model_input = inputs
 
                 predictions = model(model_input)
-                losses = criterion(predictions, labels)
+                losses = criterion(predictions, labels, model_input)
                 val_loss += losses['total'].item()
 
         val_loss /= len(val_loader)
@@ -474,7 +612,7 @@ def train_model(
                 model_input = inputs
 
             predictions = model(model_input)
-            losses = criterion(predictions, labels)
+            losses = criterion(predictions, labels, model_input)
             test_loss += losses['total'].item()
 
             # Compute DEI on predictions

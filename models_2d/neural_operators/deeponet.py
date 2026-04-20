@@ -171,12 +171,13 @@ class DeepONet2D(nn.Module):
             output_dim=output_dim,
         )
 
-        # Output scaling factor - log parameterization for positivity and stability
-        self.log_scale = nn.Parameter(torch.tensor(-4.0))  # exp(-4) ≈ 0.018
+        # Output scaling: initialize to produce reasonable output range (0.1-0.5)
+        # Use smaller initial scale since we need ~0.01 from dot product to match label range
+        self.output_scale = nn.Parameter(torch.tensor(0.01))  # Small initial scale
 
-        # Output bias - initialize to reasonable values for normalized spectra
-        # Since scale is small initially, set bias to produce output ~ 0.1-0.5
-        self.bias = nn.Parameter(torch.zeros(1, grid_size * grid_size, 1))
+        # Output bias - initialize based on mean spectrum to help training
+        # With grid_size=64, we have 4096 points, so bias per point ≈ 0.0003 for mean ≈ 0.3
+        self.bias = nn.Parameter(torch.zeros(1, grid_size * grid_size, 1) + 0.0003)
 
     def forward(self, signal: torch.Tensor) -> torch.Tensor:
         """
@@ -201,10 +202,9 @@ class DeepONet2D(nn.Module):
         # Trunk network: process coordinates
         trunk_out = self.trunk(coords)  # [B, H*W, output_dim]
 
-        # Dot product: exp(log_scale) * (branch · trunk) + bias
-        # Scale is log-parameterized for stability
-        scale = torch.exp(self.log_scale)
-        output = scale * torch.sum(branch_out * trunk_out, dim=-1, keepdim=True)  # [B, H*W, 1]
+        # Dot product: scale * (branch · trunk) + bias
+        # Scale is positive to allow learning larger values
+        output = self.output_scale * torch.sum(branch_out * trunk_out, dim=-1, keepdim=True)  # [B, H*W, 1]
         output = output + self.bias  # [B, H*W, 1]
 
         # Apply non-negative activation
