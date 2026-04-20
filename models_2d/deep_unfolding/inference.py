@@ -117,7 +117,11 @@ class InferencePipeline:
         self.model.set_kernel_matrix(K_tensor)
 
         # Load weights
-        self.model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        missing_keys, unexpected_keys = self.model.load_state_dict(
+            checkpoint['model_state_dict'],
+            strict=False,
+        )
+        self._validate_checkpoint_keys(missing_keys, unexpected_keys, path)
         self.model.eval()
 
         self.model_metadata = {
@@ -128,6 +132,39 @@ class InferencePipeline:
             'epoch': config.get('epoch', 'unknown'),
             'val_loss': config.get('val_loss', 'unknown'),
         }
+
+    def _validate_checkpoint_keys(
+        self,
+        missing_keys: list[str],
+        unexpected_keys: list[str],
+        checkpoint_path: Path,
+    ) -> None:
+        """
+        Guard against loading a checkpoint from the wrong model family.
+
+        We allow a narrow compatibility window for older deep_unfolding checkpoints
+        that were created before `denoise_scale` was introduced.
+        """
+        if self.model is None:
+            raise RuntimeError("Model must be initialized before validating checkpoint keys.")
+
+        allowed_missing = {"_K", "_Kt"}
+        if self.model.use_denoiser:
+            allowed_missing.update(
+                {f"ista_layers.{idx}.denoise_scale" for idx in range(self.model.n_layers)}
+            )
+
+        disallowed_missing = [key for key in missing_keys if key not in allowed_missing]
+        if disallowed_missing or unexpected_keys:
+            missing_preview = ", ".join(disallowed_missing[:6])
+            unexpected_preview = ", ".join(unexpected_keys[:6])
+            raise RuntimeError(
+                "Checkpoint/model mismatch for deep_unfolding. "
+                f"Checkpoint: {checkpoint_path}. "
+                f"Disallowed missing keys ({len(disallowed_missing)}): [{missing_preview}]. "
+                f"Unexpected keys ({len(unexpected_keys)}): [{unexpected_preview}]. "
+                "Please provide a deep_unfolding checkpoint."
+            )
 
     def get_model_name(self) -> str:
         """Return the model name."""

@@ -384,7 +384,23 @@ def train_model(
     start_epoch = 0
     if checkpoint_path:
         checkpoint = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        missing_keys, unexpected_keys = model.load_state_dict(
+            checkpoint['model_state_dict'],
+            strict=False,
+        )
+        allowed_missing = {"_K", "_Kt"}
+        if use_denoiser:
+            allowed_missing.update({f"ista_layers.{idx}.denoise_scale" for idx in range(n_layers)})
+        disallowed_missing = [key for key in missing_keys if key not in allowed_missing]
+        if disallowed_missing or unexpected_keys:
+            missing_preview = ", ".join(disallowed_missing[:6])
+            unexpected_preview = ", ".join(unexpected_keys[:6])
+            raise RuntimeError(
+                "Checkpoint/model mismatch for deep_unfolding training resume. "
+                f"Checkpoint: {checkpoint_path}. "
+                f"Disallowed missing keys ({len(disallowed_missing)}): [{missing_preview}]. "
+                f"Unexpected keys ({len(unexpected_keys)}): [{unexpected_preview}]."
+            )
         if 'optimizer_state_dict' in checkpoint:
             optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint.get('epoch', 0)

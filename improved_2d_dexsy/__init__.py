@@ -274,7 +274,7 @@ def available_models() -> list[str]:
 def resolve_checkpoint_path(
     checkpoint_path: str | Path | None = None,
     model_name: str = DEFAULT_MODEL_NAME,
-) -> Path:
+) -> Path | None:
     """Resolve an explicit or bundled checkpoint path."""
     if checkpoint_path is not None:
         path = Path(checkpoint_path)
@@ -282,12 +282,17 @@ def resolve_checkpoint_path(
             path = (resolve_repo_root() / path).resolve()
         return path
 
+    if model_name == "2d_ilt":
+        return None
+
     try:
         filename = DEFAULT_CHECKPOINTS[model_name]
     except KeyError as exc:
         raise ValueError(
             f"Unknown model '{model_name}'. Available models: {available_models()}"
         ) from exc
+    if filename is None:
+        return None
     return CHECKPOINTS_DIR / filename
 
 

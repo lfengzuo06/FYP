@@ -22,17 +22,38 @@ from improved_2d_dexsy import (  # noqa: E402
     create_run_output_dir,
     list_available_checkpoints,
     load_matrix,
+    resolve_checkpoint_path,
     save_prediction_result,
     to_serializable,
 )
 
 
-CHECKPOINT_CHOICES = [path.name for path in list_available_checkpoints()]
+CHECKPOINT_CHOICES = [
+    str(path.relative_to(CHECKPOINTS_DIR))
+    for path in list_available_checkpoints()
+]
+
+
+def default_checkpoint_choice(model_name: str) -> str | None:
+    """Pick the preferred checkpoint shown in the dropdown for a model."""
+    default_path = resolve_checkpoint_path(model_name=model_name)
+    if default_path is None:
+        return None
+    try:
+        candidate = str(default_path.relative_to(CHECKPOINTS_DIR))
+    except ValueError:
+        candidate = str(default_path)
+    if candidate in CHECKPOINT_CHOICES:
+        return candidate
+    return CHECKPOINT_CHOICES[0] if CHECKPOINT_CHOICES else None
 
 
 @lru_cache(maxsize=8)
-def get_pipeline(model_name: str, checkpoint_name: str, device_name: str):
-    checkpoint_path = CHECKPOINTS_DIR / checkpoint_name if checkpoint_name else None
+def get_pipeline(model_name: str, checkpoint_name: str | None, device_name: str):
+    if checkpoint_name:
+        checkpoint_path = (CHECKPOINTS_DIR / checkpoint_name).resolve()
+    else:
+        checkpoint_path = resolve_checkpoint_path(model_name=model_name)
     device = None if device_name == "auto" else device_name
     return DEXSYInferencePipeline(
         model_name=model_name,
@@ -97,7 +118,7 @@ def build_app():
                 )
                 checkpoint_name = gr.Dropdown(
                     choices=CHECKPOINT_CHOICES,
-                    value=CHECKPOINT_CHOICES[0] if CHECKPOINT_CHOICES else None,
+                    value=default_checkpoint_choice("attention_unet"),
                     label="Checkpoint",
                 )
                 device_name = gr.Dropdown(
@@ -117,6 +138,15 @@ def build_app():
             fn=run_inference_app,
             inputs=[signal_file, model_name, checkpoint_name, device_name],
             outputs=[output_plot, dei_value, summary_json, download_bundle],
+        )
+        model_name.change(
+            fn=lambda m: gr.Dropdown(
+                choices=CHECKPOINT_CHOICES,
+                value=default_checkpoint_choice(m),
+                label="Checkpoint",
+            ),
+            inputs=[model_name],
+            outputs=[checkpoint_name],
         )
 
     return demo

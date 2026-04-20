@@ -20,8 +20,8 @@ DEFAULT_OUTPUT_ROOT = REPO_ROOT / "outputs" / "inference"
 DEFAULT_MODEL_NAME = "attention_unet"
 DEFAULT_CHECKPOINTS = {
     "attention_unet": "attention_unet_best_model_20260411_155746.pt",
-    "plain_unet": "plain_unet/checkpoints_20260419_184905/best_model.pt",
-    "deep_unfolding": None,  # Not trained yet, will be set after training
+    "plain_unet": "plain_unet/checkpoints_20260419_185116/best_model.pt",
+    "deep_unfolding": "deep_unfolding/run_fixed_v1/best_model.pt",
     "2d_ilt": None,  # ILT doesn't require a checkpoint
 }
 
@@ -36,7 +36,7 @@ def list_available_checkpoints(checkpoints_dir: str | Path | None = None) -> lis
     directory = CHECKPOINTS_DIR if checkpoints_dir is None else Path(checkpoints_dir)
     if not directory.exists():
         return []
-    return sorted(directory.glob("*.pt"))
+    return sorted(path for path in directory.rglob("*.pt") if path.is_file())
 
 
 def resolve_checkpoint_path(
