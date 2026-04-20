@@ -64,6 +64,7 @@ class ISTAProximalStep(nn.Module):
 
         # Optional learnable denoiser: CNN operating on 2D [B, 1, 64, 64]
         if use_denoiser:
+            self.denoise_scale = nn.Parameter(torch.tensor(0.10))
             self.denoiser = nn.Sequential(
                 nn.Conv2d(1, 16, kernel_size=3, padding=1),
                 nn.ReLU(),
@@ -86,7 +87,9 @@ class ISTAProximalStep(nn.Module):
             Denoised estimate [B, 1, H, W]
         """
         if self.use_denoiser:
-            x_denoised = x_thresh + self.denoiser(x_thresh)
+            # Bounded residual keeps unfolded iterations numerically stable.
+            residual = torch.tanh(self.denoiser(x_thresh))
+            x_denoised = x_thresh + self.denoise_scale * residual
         else:
             x_denoised = x_thresh
 
@@ -130,6 +133,8 @@ class DeepUnfolding2D(nn.Module):
         self.n_d = n_d
         self.n_pixels = n_d * n_d
         self.use_denoiser = use_denoiser
+        if init_method not in {"mlp", "zero", "constant"}:
+            raise ValueError("init_method must be one of: 'mlp', 'zero', 'constant'")
         self.init_method = init_method
 
         # Learnable initial estimate module
@@ -217,9 +222,12 @@ class DeepUnfolding2D(nn.Module):
                 device=signal.device, dtype=signal.dtype
             ) * 0.1
         else:  # mlp
-            x_flat = self.init_estimator(s_flat)
+            s_centered = s_flat - s_flat.mean(dim=1, keepdim=True)
+            s_norm = s_centered / (s_flat.std(dim=1, keepdim=True) + 1e-6)
+            # Bounded initialization prevents numerical blow-up at early layers.
+            x_flat = 0.1 * torch.tanh(self.init_estimator(s_norm))
 
-        # Reshape to 2D for processing
+        # Reshape to 2D for iterative refinement.
         x_2d = x_flat.view(batch_size, 1, self.n_d, self.n_d)
 
         # ISTA iterations
@@ -249,14 +257,22 @@ class DeepUnfolding2D(nn.Module):
 
             # Denoiser step
             x_2d = layer(x_2d)
+            x_2d = torch.clamp(x_2d, min=-20.0, max=20.0)
 
             # Reshape back for next iteration
             x_flat = x_2d.view(batch_size, -1)
 
-        # Ensure non-negativity
-        x_2d = self.output_activation(x_2d)
+        # Final projection to a stable, non-negative normalized spectrum.
+        return self._normalize_distribution(x_2d)
 
-        return x_2d
+    def _normalize_distribution(self, x_2d: torch.Tensor) -> torch.Tensor:
+        """
+        Normalize spectrum mass to 1 per sample with numeric guard.
+
+        Adding epsilon avoids an all-zero collapse from producing NaNs.
+        """
+        x_2d = self.output_activation(x_2d) + 1e-8
+        return x_2d / (x_2d.sum(dim=(2, 3), keepdim=True) + 1e-8)
 
     def get_model_name(self) -> str:
         """Return the model name."""

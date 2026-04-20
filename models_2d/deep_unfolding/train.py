@@ -26,11 +26,11 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
 from dexsy_core.forward_model import ForwardModel2D, compute_dei
-from dexsy_core.preprocessing import build_model_inputs
 
 from .model import DeepUnfolding2D
 
@@ -42,12 +42,12 @@ class DEXSYDataset(Dataset):
         self,
         signals: np.ndarray,
         labels: np.ndarray,
-        forward_kernel: np.ndarray,
+        clean_signals: np.ndarray,
         augment: bool = False,
     ):
         self.signals = torch.from_numpy(signals).float()
         self.labels = torch.from_numpy(labels).float()
-        self.forward_kernel = torch.from_numpy(forward_kernel).float()
+        self.clean_signals = torch.from_numpy(clean_signals).float()
         self.augment = augment
 
     def __len__(self):
@@ -56,14 +56,15 @@ class DEXSYDataset(Dataset):
     def __getitem__(self, idx):
         signal = self.signals[idx]
         label = self.labels[idx]
-        K = self.forward_kernel
+        clean_signal = self.clean_signals[idx]
 
         if self.augment and random.random() < 0.5:
             # Augmentation: transpose the signal and labels
             signal = signal.transpose(-1, -2)
             label = label.transpose(-1, -2)
+            clean_signal = clean_signal.transpose(-1, -2)
 
-        return signal, label, K
+        return signal, label, clean_signal
 
 
 class DeepUnfoldingLoss(nn.Module):
@@ -71,29 +72,38 @@ class DeepUnfoldingLoss(nn.Module):
     Loss function for Deep Unfolding.
 
     Combines:
-    - Forward consistency: ||K @ f - s||^2
-    - Reconstruction loss: MSE between predicted and ground truth
-    - L1 sparsity: encourages sparse solutions
+    - KL divergence in spectrum space
+    - Weighted reconstruction loss in spectrum space
+    - Forward consistency: ||K @ f - s_clean||^2
+    - Mass and smoothness regularization
     """
 
     def __init__(
         self,
         forward_kernel: torch.Tensor,
-        alpha_consistency: float = 1.0,
-        alpha_recon: float = 1.0,
-        alpha_sparsity: float = 0.01,
+        n_b: int = 64,
+        alpha_kl: float = 1.0,
+        alpha_recon: float = 0.2,
+        alpha_consistency: float = 0.1,
+        alpha_sum: float = 0.05,
+        alpha_smooth: float = 2e-2,
+        peak_weight: float = 6.0,
     ):
         super().__init__()
         self.register_buffer('_K', forward_kernel)
+        self.n_b = n_b
+        self.alpha_kl = alpha_kl
         self.alpha_consistency = alpha_consistency
         self.alpha_recon = alpha_recon
-        self.alpha_sparsity = alpha_sparsity
+        self.alpha_sum = alpha_sum
+        self.alpha_smooth = alpha_smooth
+        self.peak_weight = peak_weight
 
     def forward(
         self,
         predictions: torch.Tensor,
         targets: torch.Tensor,
-        signals: torch.Tensor,
+        clean_signals: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
         """
         Compute loss.
@@ -101,43 +111,50 @@ class DeepUnfoldingLoss(nn.Module):
         Args:
             predictions: [B, 1, H, W] predicted spectra
             targets: [B, 1, H, W] ground truth spectra
-            signals: [B, 1, H, W] input signals
+            clean_signals: [B, 1, H, W] clean target signals in measurement space
 
         Returns:
             dict with total_loss and individual components
         """
         batch_size = predictions.shape[0]
 
-        # Ensure non-negative predictions
-        predictions_pos = torch.clamp(predictions, min=0)
+        predictions_norm = predictions / (predictions.sum(dim=(2, 3), keepdim=True) + 1e-8)
+        targets_norm = targets / (targets.sum(dim=(2, 3), keepdim=True) + 1e-8)
 
-        # Flatten for matrix operations
-        pred_flat = predictions_pos.view(batch_size, -1)
-        target_flat = targets.view(batch_size, -1)
-        signal_flat = signals.view(batch_size, -1)
+        # Weighted reconstruction + KL (same scale design as U-Net training)
+        relative_peak = targets_norm / (targets_norm.amax(dim=(2, 3), keepdim=True) + 1e-8)
+        weights = 1.0 + self.peak_weight * torch.sqrt(relative_peak + 1e-8)
+        recon_loss = torch.mean(weights * (predictions_norm - targets_norm) ** 2)
+        kl_loss = F.kl_div(torch.log(predictions_norm + 1e-8), targets_norm, reduction="batchmean")
 
-        # Forward consistency loss: ||K @ f - s||^2
+        # Forward consistency: ||K @ f - s_clean||^2
+        pred_flat = predictions_norm.view(batch_size, -1)
+        signal_flat = clean_signals.view(batch_size, -1)
         Kf = torch.matmul(pred_flat, self._K.T)
         consistency_loss = torch.mean((Kf - signal_flat) ** 2)
 
-        # Reconstruction loss: MSE
-        recon_loss = torch.mean((pred_flat - target_flat) ** 2)
-
-        # Sparsity loss: L1 on predictions (encourages sparse solutions)
-        sparsity_loss = torch.mean(torch.abs(pred_flat))
+        total_mass = predictions_norm.sum(dim=(2, 3), keepdim=True)
+        sum_penalty = torch.mean((total_mass - 1.0) ** 2)
+        smooth_x = torch.mean(torch.abs(predictions_norm[:, :, 1:, :] - predictions_norm[:, :, :-1, :]))
+        smooth_y = torch.mean(torch.abs(predictions_norm[:, :, :, 1:] - predictions_norm[:, :, :, :-1]))
+        smoothness = smooth_x + smooth_y
 
         # Total loss
         total_loss = (
-            self.alpha_consistency * consistency_loss
+            self.alpha_kl * kl_loss
             + self.alpha_recon * recon_loss
-            + self.alpha_sparsity * sparsity_loss
+            + self.alpha_consistency * consistency_loss
+            + self.alpha_sum * sum_penalty
+            + self.alpha_smooth * smoothness
         )
 
         return {
             'total': total_loss,
+            'kl': kl_loss,
             'consistency': consistency_loss,
             'reconstruction': recon_loss,
-            'sparsity': sparsity_loss,
+            'sum_penalty': sum_penalty,
+            'smoothness': smoothness,
         }
 
 
@@ -205,11 +222,15 @@ def train_model(
     n_layers: int = 12,
     hidden_dim: int = 256,
     use_denoiser: bool = True,
+    init_method: str = "mlp",
     learning_rate: float = 1e-3,
     weight_decay: float = 1e-4,
-    alpha_consistency: float = 1.0,
-    alpha_recon: float = 1.0,
-    alpha_sparsity: float = 0.01,
+    alpha_kl: float = 1.0,
+    alpha_consistency: float = 0.1,
+    alpha_recon: float = 0.2,
+    alpha_sum: float = 0.05,
+    alpha_smooth: float = 2e-2,
+    peak_weight: float = 6.0,
     early_stopping_patience: int = 12,
     early_stopping_min_delta: float = 1e-4,
     reduce_lr_patience: int = 5,
@@ -233,11 +254,15 @@ def train_model(
         n_layers: Number of ISTA layers
         hidden_dim: Hidden dimension for denoiser
         use_denoiser: Whether to use learnable denoiser
+        init_method: Initialization method for unfolded state ('zero', 'constant', 'mlp')
         learning_rate: Initial learning rate
         weight_decay: Weight decay
+        alpha_kl: Weight for KL divergence term
         alpha_consistency: Weight for forward consistency loss
         alpha_recon: Weight for reconstruction loss
-        alpha_sparsity: Weight for sparsity loss
+        alpha_sum: Weight for sum-to-one penalty
+        alpha_smooth: Weight for smoothness regularization
+        peak_weight: Peak weighting factor for reconstruction term
         early_stopping_patience: Early stopping patience
         early_stopping_min_delta: Minimum improvement for early stopping
         reduce_lr_patience: Reduce LR patience
@@ -270,9 +295,13 @@ def train_model(
     print(f"{'='*60}")
     print(f"Device: {device}")
     print(f"Epochs: {epochs}, Batch size: {batch_size}")
-    print(f"ISTA layers: {n_layers}, Hidden dim: {hidden_dim}")
+    print(f"ISTA layers: {n_layers}, Hidden dim: {hidden_dim}, Init: {init_method}")
     print(f"Learning rate: {learning_rate}, Weight decay: {weight_decay}")
-    print(f"Loss weights: consistency={alpha_consistency}, recon={alpha_recon}, sparsity={alpha_sparsity}")
+    print(
+        "Loss weights: "
+        f"kl={alpha_kl}, recon={alpha_recon}, consistency={alpha_consistency}, "
+        f"sum={alpha_sum}, smooth={alpha_smooth}"
+    )
 
     # Forward model and kernel matrix
     forward_model = ForwardModel2D(n_d=64, n_b=64)
@@ -295,19 +324,19 @@ def train_model(
     train_dataset = DEXSYDataset(
         signals=datasets['train']['signals'],
         labels=datasets['train']['labels'],
-        forward_kernel=K,
+        clean_signals=datasets['train']['clean_signals'],
         augment=True,
     )
     val_dataset = DEXSYDataset(
         signals=datasets['val']['signals'],
         labels=datasets['val']['labels'],
-        forward_kernel=K,
+        clean_signals=datasets['val']['clean_signals'],
         augment=False,
     )
     test_dataset = DEXSYDataset(
         signals=datasets['test']['signals'],
         labels=datasets['test']['labels'],
-        forward_kernel=K,
+        clean_signals=datasets['test']['clean_signals'],
         augment=False,
     )
 
@@ -321,6 +350,7 @@ def train_model(
         n_d=64,
         hidden_dim=hidden_dim,
         use_denoiser=use_denoiser,
+        init_method=init_method,
     ).to(device)
 
     # Set kernel matrix
@@ -329,9 +359,13 @@ def train_model(
     # Loss
     criterion = DeepUnfoldingLoss(
         forward_kernel=K_tensor,
+        n_b=forward_model.n_b,
+        alpha_kl=alpha_kl,
         alpha_consistency=alpha_consistency,
         alpha_recon=alpha_recon,
-        alpha_sparsity=alpha_sparsity,
+        alpha_sum=alpha_sum,
+        alpha_smooth=alpha_smooth,
+        peak_weight=peak_weight,
     ).to(device)
 
     # Optimizer
@@ -350,8 +384,9 @@ def train_model(
     start_epoch = 0
     if checkpoint_path:
         checkpoint = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        model.load_state_dict(checkpoint['model_state_dict'], strict=False)
+        if 'optimizer_state_dict' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         start_epoch = checkpoint.get('epoch', 0)
         print(f"Loaded checkpoint from epoch {start_epoch}")
 
@@ -371,9 +406,10 @@ def train_model(
         train_consistency = 0.0
         train_recon = 0.0
 
-        for signals, labels, K_batch in train_loader:
+        for signals, labels, clean_signals in train_loader:
             signals = signals.to(device)
             labels = labels.to(device)
+            clean_signals = clean_signals.to(device)
 
             optimizer.zero_grad()
 
@@ -381,7 +417,7 @@ def train_model(
             predictions = model(signals)
 
             # Loss
-            losses = criterion(predictions, labels, signals)
+            losses = criterion(predictions, labels, clean_signals)
             loss = losses['total']
 
             # Backward
@@ -405,12 +441,13 @@ def train_model(
         val_recon = 0.0
 
         with torch.no_grad():
-            for signals, labels, K_batch in val_loader:
+            for signals, labels, clean_signals in val_loader:
                 signals = signals.to(device)
                 labels = labels.to(device)
+                clean_signals = clean_signals.to(device)
 
                 predictions = model(signals)
-                losses = criterion(predictions, labels, signals)
+                losses = criterion(predictions, labels, clean_signals)
 
                 val_loss += losses['total'].item()
                 val_consistency += losses['consistency'].item()
@@ -460,6 +497,7 @@ def train_model(
                     'n_layers': n_layers,
                     'hidden_dim': hidden_dim,
                     'use_denoiser': use_denoiser,
+                    'init_method': init_method,
                 }
             }, output_dir / f"checkpoint_epoch_{epoch+1}.pt")
 
@@ -474,6 +512,7 @@ def train_model(
             'n_layers': n_layers,
             'hidden_dim': hidden_dim,
             'use_denoiser': use_denoiser,
+            'init_method': init_method,
             'epoch': epochs,
             'val_loss': best_val_loss,
         }
@@ -486,12 +525,13 @@ def train_model(
     test_dei = []
 
     with torch.no_grad():
-        for signals, labels, K_batch in test_loader:
+        for signals, labels, clean_signals in test_loader:
             signals = signals.to(device)
             labels = labels.to(device)
+            clean_signals = clean_signals.to(device)
 
             predictions = model(signals)
-            losses = criterion(predictions, labels, signals)
+            losses = criterion(predictions, labels, clean_signals)
 
             test_loss += losses['total'].item()
 

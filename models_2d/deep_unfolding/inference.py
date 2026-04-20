@@ -101,12 +101,14 @@ class InferencePipeline:
         config = checkpoint.get('config', {})
         n_layers = config.get('n_layers', self.n_layers)
         hidden_dim = config.get('hidden_dim', self.hidden_dim)
+        init_method = config.get('init_method', 'mlp')
 
         # Create model
         self.model = DeepUnfolding2D(
             n_layers=n_layers,
             n_d=self.forward_model.n_d,
             hidden_dim=hidden_dim,
+            init_method=init_method,
         ).to(self.device)
 
         # Set kernel matrix
@@ -115,13 +117,14 @@ class InferencePipeline:
         self.model.set_kernel_matrix(K_tensor)
 
         # Load weights
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model.load_state_dict(checkpoint['model_state_dict'], strict=False)
         self.model.eval()
 
         self.model_metadata = {
             'checkpoint_path': str(path),
             'n_layers': n_layers,
             'hidden_dim': hidden_dim,
+            'init_method': init_method,
             'epoch': config.get('epoch', 'unknown'),
             'val_loss': config.get('val_loss', 'unknown'),
         }
@@ -140,12 +143,15 @@ class InferencePipeline:
             **self.model_metadata,
         }
 
-    def _predict_distribution(self, model_inputs: torch.Tensor) -> np.ndarray:
+    def _predict_distribution(self, model_inputs: torch.Tensor | np.ndarray) -> np.ndarray:
         """Run model inference."""
         if self.model is None:
             raise RuntimeError("Model not loaded. Provide checkpoint_path or call _load_model().")
 
         with torch.no_grad():
+            if isinstance(model_inputs, np.ndarray):
+                model_inputs = torch.from_numpy(model_inputs).float()
+
             # model_inputs is [B, 3, H, W], we need signal [B, 1, H, W]
             if model_inputs.shape[1] == 3:
                 # Extract first channel (raw signal)
@@ -153,7 +159,7 @@ class InferencePipeline:
             else:
                 signal = model_inputs
 
-            predictions = self.model(signal.to(self.device))
+            predictions = self.model(signal.to(self.device, dtype=torch.float32))
             return predictions.cpu().numpy()
 
     def _summarize_prediction(
@@ -300,8 +306,12 @@ class InferencePipeline:
         validated = validate_signal_grid(signals, self.forward_model)
         model_inputs = build_model_inputs(validated, self.forward_model)
 
-        # Predict in batches
-        predictions = self._predict_distribution(model_inputs)
+        # Predict in mini-batches to control memory usage.
+        prediction_batches = []
+        for start in range(0, len(model_inputs), max(1, batch_size)):
+            end = min(start + max(1, batch_size), len(model_inputs))
+            prediction_batches.append(self._predict_distribution(model_inputs[start:end]))
+        predictions = np.concatenate(prediction_batches, axis=0)
 
         if true_spectra is not None:
             true_array = np.asarray(true_spectra, dtype=np.float32)
@@ -314,7 +324,8 @@ class InferencePipeline:
             source_names = [f"sample_{idx:03d}" for idx in range(len(predictions))]
 
         results = []
-        for idx, reconstructed in enumerate(predictions):
+        for idx in range(len(predictions)):
+            reconstructed = predictions[idx, 0]
             signal_2d = validated[idx, 0]
             gt = true_array[idx] if true_array is not None else None
             summary = self._summarize_prediction(signal_2d, reconstructed, gt)
