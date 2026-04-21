@@ -26,6 +26,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
@@ -42,10 +43,12 @@ class DEXSYDataset(Dataset):
         self,
         inputs: np.ndarray,
         labels: np.ndarray,
+        clean_signals: np.ndarray,
         augment: bool = False,
     ):
         self.inputs = torch.from_numpy(inputs).float()
         self.labels = torch.from_numpy(labels).float()
+        self.clean_signals = torch.from_numpy(clean_signals).float()
         self.augment = augment
 
     def __len__(self):
@@ -54,39 +57,46 @@ class DEXSYDataset(Dataset):
     def __getitem__(self, idx):
         x = self.inputs[idx]
         y = self.labels[idx]
+        clean = self.clean_signals[idx]
 
         if self.augment and random.random() < 0.5:
             x = x.transpose(-1, -2)
             y = y.transpose(-1, -2)
+            clean = clean.transpose(-1, -2)
 
-        return x, y
+        return x, y, clean
 
 
 class PhysicsInformedNeuralOperatorLoss(nn.Module):
     """
-    Physics-informed loss for Neural Operators on DEXSY.
-    
-    Combines:
-    - Weighted reconstruction loss with peak awareness
-    - Forward consistency loss (reconstruct signal from predicted spectrum)
-    - Sum-to-one regularization
-    - Smoothness regularization
+    Physics-informed loss aligned with the stable Attention U-Net setup.
+
+    Components:
+    - KL divergence on normalized spectra
+    - Peak-weighted reconstruction loss
+    - Forward-consistency loss in signal space
+    - Sum-to-one penalty
+    - TV-style smoothness regularization
     """
 
     def __init__(
         self,
         forward_model,
-        alpha_recon: float = 1.0,
-        alpha_forward: float = 0.5,
-        alpha_smooth: float = 0.01,
-        peak_weight: float = 10.0,
+        alpha_kl: float = 1.0,
+        alpha_rec: float = 0.2,
+        alpha_signal: float = 0.1,
+        alpha_sum: float = 0.05,
+        peak_weight: float = 6.0,
+        alpha_smooth: float = 2e-2,
     ):
         super().__init__()
         kernel = torch.from_numpy(forward_model.kernel_matrix).float()
         self.register_buffer("kernel_matrix", kernel)
         self.n_b = forward_model.n_b
-        self.alpha_recon = alpha_recon
-        self.alpha_forward = alpha_forward
+        self.alpha_kl = alpha_kl
+        self.alpha_rec = alpha_rec
+        self.alpha_signal = alpha_signal
+        self.alpha_sum = alpha_sum
         self.alpha_smooth = alpha_smooth
         self.peak_weight = peak_weight
 
@@ -101,49 +111,48 @@ class PhysicsInformedNeuralOperatorLoss(nn.Module):
         self,
         predictions: torch.Tensor,
         targets: torch.Tensor,
-        input_signals: torch.Tensor,
+        signal_targets: torch.Tensor,
     ) -> dict[str, torch.Tensor]:
         """
         Compute physics-informed loss.
-        
+
         Args:
             predictions: [B, 1, H, W] predicted spectra
             targets: [B, 1, H, W] ground truth spectra
-            input_signals: [B, 1, H, W] input noisy signals
+            signal_targets: [B, 1, H, W] clean forward-model signal targets
         """
-        # Normalize predictions for stable loss computation
         pred_norm = predictions / (predictions.sum(dim=(2, 3), keepdim=True) + 1e-8)
         target_norm = targets / (targets.sum(dim=(2, 3), keepdim=True) + 1e-8)
-        
-        # Peak-weighted reconstruction loss
-        relative_peak = targets / (targets.amax(dim=(2, 3), keepdim=True) + 1e-8)
-        weights = 1.0 + self.peak_weight * torch.sqrt(relative_peak + 1e-8)
-        recon_loss = torch.mean(weights * (pred_norm - target_norm) ** 2)
-        
-        # Forward consistency loss
-        pred_signal = self.reconstruct_signal(predictions)
-        # Normalize input signal too for fair comparison
-        input_norm = input_signals / (input_signals.sum(dim=(2, 3), keepdim=True) + 1e-8)
-        forward_loss = torch.mean((pred_signal - input_norm) ** 2)
-        
-        # Smoothness regularization
-        laplacian = predictions[:, :, 1:-1, 1:-1] * 4 \
-            - predictions[:, :, :-2, 1:-1] \
-            - predictions[:, :, 2:, 1:-1] \
-            - predictions[:, :, 1:-1, :-2] \
-            - predictions[:, :, 1:-1, 2:]
-        smooth_loss = torch.mean(laplacian ** 2)
-        
-        # Total loss
-        total_loss = (self.alpha_recon * recon_loss + 
-                      self.alpha_forward * forward_loss + 
-                      self.alpha_smooth * smooth_loss)
-        
+
+        relative_peak_map = target_norm / (target_norm.amax(dim=(2, 3), keepdim=True) + 1e-8)
+        weights = 1.0 + self.peak_weight * torch.sqrt(relative_peak_map + 1e-8)
+        rec_loss = torch.mean(weights * (pred_norm - target_norm) ** 2)
+        kl_loss = F.kl_div(torch.log(pred_norm + 1e-8), target_norm, reduction="batchmean")
+
+        pred_signals = self.reconstruct_signal(pred_norm)
+        signal_loss = F.mse_loss(pred_signals, signal_targets)
+
+        total_mass = pred_norm.sum(dim=(2, 3), keepdim=True)
+        sum_penalty = torch.mean((total_mass - 1.0) ** 2)
+        smooth_x = torch.mean(torch.abs(pred_norm[:, :, 1:, :] - pred_norm[:, :, :-1, :]))
+        smooth_y = torch.mean(torch.abs(pred_norm[:, :, :, 1:] - pred_norm[:, :, :, :-1]))
+        smooth_loss = smooth_x + smooth_y
+
+        total_loss = (
+            self.alpha_kl * kl_loss
+            + self.alpha_rec * rec_loss
+            + self.alpha_signal * signal_loss
+            + self.alpha_sum * sum_penalty
+            + self.alpha_smooth * smooth_loss
+        )
+
         return {
-            'total': total_loss,
-            'reconstruction': recon_loss,
-            'forward': forward_loss,
-            'smoothness': smooth_loss,
+            "total": total_loss,
+            "kl": kl_loss,
+            "reconstruction": rec_loss,
+            "signal": signal_loss,
+            "sum_penalty": sum_penalty,
+            "smoothness": smooth_loss,
         }
 
 
@@ -276,12 +285,14 @@ def generate_dataset(
         )
 
         S = S.reshape(-1, 1, forward_model.n_b, forward_model.n_b).astype(np.float32)
+        S_clean = S_clean.reshape(-1, 1, forward_model.n_b, forward_model.n_b).astype(np.float32)
         F = F.reshape(-1, 1, forward_model.n_d, forward_model.n_d).astype(np.float32)
         inputs = build_model_inputs(S, forward_model)
 
         datasets[split_name] = {
             'inputs': inputs,
             'signals': S,
+            'clean_signals': S_clean,
             'labels': F
         }
 

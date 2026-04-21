@@ -212,6 +212,7 @@ class DeepONet2D(nn.Module):
 
         # Reshape to 2D grid
         output = output.view(batch_size, 1, self.grid_size, self.grid_size)
+        output = output / (output.sum(dim=(2, 3), keepdim=True) + 1e-8)
 
         return output
 

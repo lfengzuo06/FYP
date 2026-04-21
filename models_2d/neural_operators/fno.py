@@ -200,6 +200,7 @@ class FNO2D(nn.Module):
 
         # Output projection
         x = self.output_proj(x)
+        x = x / (x.sum(dim=(2, 3), keepdim=True) + 1e-8)
 
         return x
 
