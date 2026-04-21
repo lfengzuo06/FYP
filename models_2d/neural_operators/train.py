@@ -397,16 +397,19 @@ def train_model(
     train_dataset = DEXSYDataset(
         inputs=datasets['train']['inputs'],
         labels=datasets['train']['labels'],
+        clean_signals=datasets['train']['clean_signals'],
         augment=True,
     )
     val_dataset = DEXSYDataset(
         inputs=datasets['val']['inputs'],
         labels=datasets['val']['labels'],
+        clean_signals=datasets['val']['clean_signals'],
         augment=False,
     )
     test_dataset = DEXSYDataset(
         inputs=datasets['test']['inputs'],
         labels=datasets['test']['labels'],
+        clean_signals=datasets['test']['clean_signals'],
         augment=False,
     )
 
@@ -476,13 +479,15 @@ def train_model(
         print(f"  Sample output range: [{sample_output.min().item():.6f}, {sample_output.max().item():.6f}]")
     model.train()
 
-    # Use Physics-Informed loss for better training stability
+    # Use the same stable physics-informed objective used by Attention U-Net.
     criterion = PhysicsInformedNeuralOperatorLoss(
         forward_model=forward_model,
-        alpha_recon=1.0,
-        alpha_forward=0.1,  # Reduced weight to prevent trivial solutions
-        alpha_smooth=0.01,
-        peak_weight=10.0,
+        alpha_kl=1.0,
+        alpha_rec=0.2,
+        alpha_signal=0.1,
+        alpha_sum=0.05,
+        peak_weight=6.0,
+        alpha_smooth=2e-2,
     ).to(device)
 
     # Optimizer
@@ -520,9 +525,10 @@ def train_model(
         model.train()
         train_loss = 0.0
 
-        for inputs, labels in train_loader:
+        for inputs, labels, clean_signals in train_loader:
             inputs = inputs.to(device)
             labels = labels.to(device)
+            clean_signals = clean_signals.to(device)
 
             # Select correct input based on model type
             if model_type == "deeponet":
@@ -531,7 +537,7 @@ def train_model(
             else:
                 # FNO takes 3-channel input
                 model_input = inputs
-            signal_for_loss = inputs[:, 0:1]
+            signal_for_loss = clean_signals
 
             optimizer.zero_grad()
             predictions = model(model_input)
@@ -551,16 +557,17 @@ def train_model(
         val_loss = 0.0
 
         with torch.no_grad():
-            for inputs, labels in val_loader:
+            for inputs, labels, clean_signals in val_loader:
                 inputs = inputs.to(device)
                 labels = labels.to(device)
+                clean_signals = clean_signals.to(device)
 
                 # Select correct input based on model type
                 if model_type == "deeponet":
                     model_input = inputs[:, 0:1]
                 else:
                     model_input = inputs
-                signal_for_loss = inputs[:, 0:1]
+                signal_for_loss = clean_signals
 
                 predictions = model(model_input)
                 losses = criterion(predictions, labels, signal_for_loss)
@@ -615,18 +622,20 @@ def train_model(
     model.eval()
     test_loss = 0.0
     test_dei = []
+    test_dei_true = []
 
     with torch.no_grad():
-        for inputs, labels in test_loader:
+        for inputs, labels, clean_signals in test_loader:
             inputs = inputs.to(device)
             labels = labels.to(device)
+            clean_signals = clean_signals.to(device)
 
             # Select correct input based on model type
             if model_type == "deeponet":
                 model_input = inputs[:, 0:1]
             else:
                 model_input = inputs
-            signal_for_loss = inputs[:, 0:1]
+            signal_for_loss = clean_signals
 
             predictions = model(model_input)
             losses = criterion(predictions, labels, signal_for_loss)
@@ -640,9 +649,12 @@ def train_model(
                 pred_spectrum = preds_np[i, 0]
                 dei = compute_dei(pred_spectrum)
                 test_dei.append(dei)
+                test_dei_true.append(compute_dei(labels_np[i, 0]))
 
     test_loss /= len(test_loader)
     test_dei = np.array(test_dei)
+    test_dei_true = np.array(test_dei_true)
+    test_dei_mae = np.mean(np.abs(test_dei - test_dei_true))
 
     print(f"\n{'='*60}")
     print(f"Test Results")
@@ -650,6 +662,8 @@ def train_model(
     print(f"Test loss: {test_loss:.4f}")
     print(f"Test DEI: mean={test_dei.mean():.4f}, std={test_dei.std():.4f}")
     print(f"Test DEI range: [{test_dei.min():.4f}, {test_dei.max():.4f}]")
+    print(f"GT DEI: mean={test_dei_true.mean():.4f}, std={test_dei_true.std():.4f}")
+    print(f"DEI MAE (pred vs GT): {test_dei_mae:.4f}")
 
     return model, history, datasets, forward_model
 

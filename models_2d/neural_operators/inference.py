@@ -158,6 +158,14 @@ class InferencePipeline:
             predictions = self.model(model_inputs.to(self.device))
             return predictions.cpu().numpy()
 
+    @staticmethod
+    def _normalize_distribution(spectrum: np.ndarray) -> np.ndarray:
+        """Normalize one 2D spectrum to unit mass."""
+        total = float(np.sum(spectrum))
+        if total <= 1e-12:
+            return np.full_like(spectrum, 1.0 / spectrum.size)
+        return spectrum / total
+
     def _summarize_prediction(
         self,
         signal: np.ndarray,
@@ -261,7 +269,7 @@ class InferencePipeline:
 
         # Predict
         predictions = self._predict_distribution(model_inputs)
-        reconstructed = predictions[0, 0]
+        reconstructed = self._normalize_distribution(predictions[0, 0])
 
         summary = self._summarize_prediction(signal_2d, reconstructed, true_spectrum)
 
@@ -337,6 +345,7 @@ class InferencePipeline:
                 reconstructed_2d = reconstructed[0]  # [H, W]
             else:
                 reconstructed_2d = reconstructed
+            reconstructed_2d = self._normalize_distribution(reconstructed_2d)
 
             signal_2d = validated[idx, 0]
             gt = true_array[idx] if true_array is not None else None
