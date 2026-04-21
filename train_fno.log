@@ -1,0 +1,69 @@
+
+============================================================
+Neural Operator Training (FNO)
+============================================================
+Device: cuda
+Epochs: 60, Batch size: 8
+Learning rate: 0.001, Weight decay: 0.0001
+
+Generating datasets...
+  train: 9500 samples, signal range [0.0000, 1.0821], label range [0.0000, 0.6542]
+  val: 400 samples, signal range [0.0016, 1.0799], label range [0.0000, 0.5132]
+  test: 100 samples, signal range [0.0008, 1.0553], label range [0.0000, 0.5441]
+
+Model architecture:
+  Signal input dim: 4096
+  Grid size: 64
+  Sample output range: [0.000215, 0.000349]
+
+Starting training from epoch 0...
+Epoch   1/60 | Train: 2.3105 | Val: 0.9969 | LR: 1.00e-03 | 6.7s (improved)
+Epoch   2/60 | Train: 0.8173 | Val: 0.6115 | LR: 1.00e-03 | 5.6s (improved)
+Epoch   3/60 | Train: 0.5936 | Val: 0.5101 | LR: 1.00e-03 | 5.6s (improved)
+Epoch   4/60 | Train: 0.5002 | Val: 0.4465 | LR: 1.00e-03 | 5.5s (improved)
+Epoch   5/60 | Train: 0.4476 | Val: 0.3793 | LR: 1.00e-03 | 5.4s (improved)
+Epoch   6/60 | Train: 0.4077 | Val: 0.3617 | LR: 1.00e-03 | 5.4s (improved)
+Epoch   7/60 | Train: 0.3828 | Val: 0.3177 | LR: 1.00e-03 | 5.4s (improved)
+Epoch   8/60 | Train: 0.3623 | Val: 0.3493 | LR: 1.00e-03 | 5.4s
+Epoch   9/60 | Train: 0.3448 | Val: 0.2923 | LR: 1.00e-03 | 5.4s (improved)
+Epoch  10/60 | Train: 0.3262 | Val: 0.2867 | LR: 1.00e-03 | 5.4s (improved)
+Epoch  11/60 | Train: 0.3198 | Val: 0.2934 | LR: 1.00e-03 | 5.4s
+Epoch  12/60 | Train: 0.3032 | Val: 0.3107 | LR: 1.00e-03 | 5.4s
+Epoch  13/60 | Train: 0.3025 | Val: 0.2655 | LR: 1.00e-03 | 5.4s (improved)
+Epoch  14/60 | Train: 0.2908 | Val: 0.2729 | LR: 1.00e-03 | 5.4s
+Epoch  15/60 | Train: 0.2803 | Val: 0.2740 | LR: 1.00e-03 | 5.4s
+Epoch  16/60 | Train: 0.2733 | Val: 0.2652 | LR: 1.00e-03 | 5.4s (improved)
+Epoch  17/60 | Train: 0.2647 | Val: 0.2562 | LR: 1.00e-03 | 5.4s (improved)
+Epoch  18/60 | Train: 0.2606 | Val: 0.2505 | LR: 1.00e-03 | 5.4s (improved)
+Epoch  19/60 | Train: 0.2499 | Val: 0.2410 | LR: 1.00e-03 | 5.4s (improved)
+Epoch  20/60 | Train: 0.2495 | Val: 0.2518 | LR: 1.00e-03 | 5.4s
+Epoch  21/60 | Train: 0.2432 | Val: 0.2446 | LR: 1.00e-03 | 5.4s
+Epoch  22/60 | Train: 0.2333 | Val: 0.2523 | LR: 1.00e-03 | 5.4s
+Epoch  23/60 | Train: 0.2277 | Val: 0.2591 | LR: 1.00e-03 | 5.4s
+Epoch  24/60 | Train: 0.2240 | Val: 0.2426 | LR: 1.00e-03 | 5.4s
+Epoch  25/60 | Train: 0.2236 | Val: 0.2258 | LR: 1.00e-03 | 5.4s (improved)
+Epoch  26/60 | Train: 0.2141 | Val: 0.2863 | LR: 1.00e-03 | 5.4s
+Epoch  27/60 | Train: 0.2044 | Val: 0.2384 | LR: 1.00e-03 | 5.4s
+Epoch  28/60 | Train: 0.2048 | Val: 0.2431 | LR: 1.00e-03 | 5.4s
+Epoch  29/60 | Train: 0.1978 | Val: 0.2556 | LR: 1.00e-03 | 5.4s
+Epoch  30/60 | Train: 0.1957 | Val: 0.2666 | LR: 1.00e-03 | 5.4s
+Epoch  31/60 | Train: 0.1873 | Val: 0.2787 | LR: 5.00e-04 | 5.4s
+Epoch  32/60 | Train: 0.1498 | Val: 0.2645 | LR: 5.00e-04 | 5.4s
+Epoch  33/60 | Train: 0.1403 | Val: 0.2409 | LR: 5.00e-04 | 5.4s
+Epoch  34/60 | Train: 0.1358 | Val: 0.2518 | LR: 5.00e-04 | 5.4s
+Epoch  35/60 | Train: 0.1303 | Val: 0.2545 | LR: 5.00e-04 | 5.4s
+Epoch  36/60 | Train: 0.1269 | Val: 0.2341 | LR: 5.00e-04 | 5.4s
+Epoch  37/60 | Train: 0.1231 | Val: 0.2488 | LR: 2.50e-04 | 5.4s
+
+Early stopping at epoch 37
+
+Best model saved to checkpoints/fno/run_20260420/best_model.pt
+
+============================================================
+Test Results
+============================================================
+Test loss: 0.2795
+Test DEI: mean=0.1287, std=0.1591
+Test DEI range: [0.0065, 0.6342]
+GT DEI: mean=0.1267, std=0.1801
+DEI MAE (pred vs GT): 0.0315
