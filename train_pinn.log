@@ -1,0 +1,79 @@
+
+============================================================
+PINN Training
+============================================================
+Device: cuda
+Epochs: 60, Batch size: 8
+Learning rate: 0.001, Weight decay: 0.0001
+
+Generating datasets...
+  train: 9500 samples, noisy signal range [0.0000, 1.0821], label range [0.0000, 0.6542]
+  val: 400 samples, noisy signal range [0.0016, 1.0799], label range [0.0000, 0.5132]
+  test: 100 samples, noisy signal range [0.0008, 1.0553], label range [0.0000, 0.5441]
+
+Model: PINN2D
+  Parameters: 1,350,337
+
+Starting training from epoch 0...
+Epoch   1/60 | Train: 0.0052 | Val: 0.0024 | LR: 1.00e-03 | 6.6s (improved)
+Epoch   2/60 | Train: 0.0023 | Val: 0.0026 | LR: 1.00e-03 | 3.8s
+Epoch   3/60 | Train: 0.0017 | Val: 0.0026 | LR: 1.00e-03 | 3.8s
+Epoch   4/60 | Train: 0.0021 | Val: 0.0013 | LR: 1.00e-03 | 3.8s (improved)
+Epoch   5/60 | Train: 0.0015 | Val: 0.0020 | LR: 1.00e-03 | 3.8s
+Epoch   6/60 | Train: 0.0012 | Val: 0.0012 | LR: 1.00e-03 | 3.8s (improved)
+Epoch   7/60 | Train: 0.0012 | Val: 0.0010 | LR: 1.00e-03 | 3.8s (improved)
+Epoch   8/60 | Train: 0.0011 | Val: 0.0011 | LR: 1.00e-03 | 3.8s
+Epoch   9/60 | Train: 0.0010 | Val: 0.0009 | LR: 1.00e-03 | 3.8s (improved)
+Epoch  10/60 | Train: 0.0010 | Val: 0.0013 | LR: 1.00e-03 | 3.7s
+Epoch  11/60 | Train: 0.0010 | Val: 0.0011 | LR: 1.00e-03 | 3.8s
+Epoch  12/60 | Train: 0.0009 | Val: 0.0009 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  13/60 | Train: 0.0008 | Val: 0.0007 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  14/60 | Train: 0.0008 | Val: 0.0008 | LR: 1.00e-03 | 3.7s
+Epoch  15/60 | Train: 0.0008 | Val: 0.0007 | LR: 1.00e-03 | 3.7s
+Epoch  16/60 | Train: 0.0007 | Val: 0.0010 | LR: 1.00e-03 | 3.7s
+Epoch  17/60 | Train: 0.0011 | Val: 0.0009 | LR: 1.00e-03 | 3.7s
+Epoch  18/60 | Train: 0.0008 | Val: 0.0006 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  19/60 | Train: 0.0007 | Val: 0.0006 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  20/60 | Train: 0.0007 | Val: 0.0010 | LR: 1.00e-03 | 3.7s
+Epoch  21/60 | Train: 0.0007 | Val: 0.0007 | LR: 1.00e-03 | 3.7s
+Epoch  22/60 | Train: 0.0007 | Val: 0.0010 | LR: 1.00e-03 | 3.7s
+Epoch  23/60 | Train: 0.0007 | Val: 0.0007 | LR: 1.00e-03 | 3.7s
+Epoch  24/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  25/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  26/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  27/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  28/60 | Train: 0.0006 | Val: 0.0008 | LR: 1.00e-03 | 3.7s
+Epoch  29/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  30/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  31/60 | Train: 0.0006 | Val: 0.0008 | LR: 1.00e-03 | 3.7s
+Epoch  32/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  33/60 | Train: 0.0006 | Val: 0.0005 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  34/60 | Train: 0.0005 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  35/60 | Train: 0.0005 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  36/60 | Train: 0.0005 | Val: 0.0005 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  37/60 | Train: 0.0005 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+Epoch  38/60 | Train: 0.0005 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+Epoch  39/60 | Train: 0.0005 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+Epoch  40/60 | Train: 0.0005 | Val: 0.0004 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  41/60 | Train: 0.0005 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+Epoch  42/60 | Train: 0.0005 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+Epoch  43/60 | Train: 0.0005 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+Epoch  44/60 | Train: 0.0005 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+Epoch  45/60 | Train: 0.0005 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  46/60 | Train: 0.0005 | Val: 0.0005 | LR: 5.00e-04 | 3.7s
+Epoch  47/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s (improved)
+Epoch  48/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s (improved)
+Epoch  49/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s
+Epoch  50/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s
+Epoch  51/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s
+Epoch  52/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s (improved)
+Epoch  53/60 | Train: 0.0004 | Val: 0.0005 | LR: 5.00e-04 | 3.7s
+Epoch  54/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s
+Epoch  55/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s
+Epoch  56/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s (improved)
+Epoch  57/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s (improved)
+Epoch  58/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s
+Epoch  59/60 | Train: 0.0004 | Val: 0.0010 | LR: 5.00e-04 | 3.7s
+Epoch  60/60 | Train: 0.0004 | Val: 0.0004 | LR: 5.00e-04 | 3.7s
+
+Model saved to training_output_2d/pinn_v2/checkpoints/pinn_20260422_174342.pt
