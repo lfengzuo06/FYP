@@ -63,6 +63,7 @@ class InferencePipeline:
     """
 
     MODEL_NAME = "plain_unet"
+    DEFAULT_CHECKPOINT = "plain_unet/best_model.pt"
 
     def __init__(
         self,
@@ -74,11 +75,16 @@ class InferencePipeline:
         Initialize the inference pipeline.
 
         Args:
-            checkpoint_path: Path to model checkpoint. If None, uses default.
+            checkpoint_path: Path to model checkpoint. If None, searches default locations.
             device: Device to use ('cuda', 'cpu', or None for auto)
             forward_model: ForwardModel2D instance (creates new if None)
         """
         self.forward_model = forward_model or ForwardModel2D(n_d=64, n_b=64)
+        
+        # Resolve checkpoint path
+        if checkpoint_path is None:
+            checkpoint_path = self._find_default_checkpoint()
+        
         self.checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
 
         # Device setup
@@ -88,6 +94,18 @@ class InferencePipeline:
 
         # Load model
         self.model, self.model_metadata = self._load_model()
+
+    def _find_default_checkpoint(self) -> Path | None:
+        """Find the default checkpoint from bundled locations."""
+        root = Path(__file__).parent.parent.parent
+        preferred_paths = [
+            root / "checkpoints" / self.DEFAULT_CHECKPOINT,
+            root / "checkpoints" / "plain_unet" / "best_model.pt",
+        ]
+        for p in preferred_paths:
+            if p.exists():
+                return p
+        return None
 
     def _load_model(self) -> tuple:
         """Load the trained model from checkpoint."""

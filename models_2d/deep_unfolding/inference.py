@@ -50,6 +50,7 @@ class InferencePipeline:
     """
 
     MODEL_NAME = "deep_unfolding"
+    DEFAULT_CHECKPOINT = "deep_unfolding/best_model.pt"
 
     def __init__(
         self,
@@ -63,7 +64,7 @@ class InferencePipeline:
         Initialize the Deep Unfolding inference pipeline.
 
         Args:
-            checkpoint_path: Path to model checkpoint
+            checkpoint_path: Path to model checkpoint. If None, searches default locations.
             device: Device to use ('cuda', 'cpu', or None for auto)
             forward_model: ForwardModel2D instance
             n_layers: Number of ISTA layers (must match checkpoint)
@@ -85,9 +86,31 @@ class InferencePipeline:
         self.model: DeepUnfolding2D | None = None
         self.model_metadata: dict[str, Any] = {}
 
-        # Load checkpoint if provided
+        # Load checkpoint
         if checkpoint_path is not None:
             self._load_model(checkpoint_path)
+        else:
+            checkpoint_path = self._find_default_checkpoint()
+            if checkpoint_path is not None:
+                self._load_model(checkpoint_path)
+            else:
+                raise FileNotFoundError(
+                    f"No checkpoint found for deep_unfolding. "
+                    f"Train the model first using 'python -m models_2d.deep_unfolding.train'. "
+                    f"Or provide a checkpoint_path explicitly."
+                )
+
+    def _find_default_checkpoint(self) -> Path | None:
+        """Find the default checkpoint from bundled locations."""
+        root = Path(__file__).parent.parent.parent
+        preferred_paths = [
+            root / "checkpoints" / self.DEFAULT_CHECKPOINT,
+            root / "checkpoints" / "deep_unfolding" / "best_model.pt",
+        ]
+        for p in preferred_paths:
+            if p.exists():
+                return p
+        return None
 
     def _load_model(self, checkpoint_path: str | Path):
         """Load model from checkpoint."""

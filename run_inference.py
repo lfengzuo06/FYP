@@ -132,10 +132,10 @@ def main() -> int:
         batch_size=args.batch_size,
         include_figures=not args.no_figure,
     )
-    if config.model_name in {"deeponet", "fno"} and config.resolved_checkpoint_path is None:
+    if config.model_name in {"deeponet"} and config.resolved_checkpoint_path is None:
         parser.error(
             f"Model '{config.model_name}' requires a checkpoint. "
-            "Provide --checkpoint-path or configure DEFAULT_CHECKPOINTS in improved_2d_dexsy/config.py."
+            "Provide --checkpoint-path or train the model first."
         )
     pipeline = DEXSYInferencePipeline(
         model_name=config.model_name,

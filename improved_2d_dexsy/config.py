@@ -19,12 +19,12 @@ CHECKPOINTS_DIR = REPO_ROOT / "checkpoints"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "outputs" / "inference"
 DEFAULT_MODEL_NAME = "attention_unet"
 DEFAULT_CHECKPOINTS = {
-    "attention_unet": "attention_unet_best_model_20260411_155746.pt",
-    "plain_unet": "plain_unet/checkpoints_20260419_185116/best_model.pt",
-    "pinn": "pinn_v2/checkpoints/pinn_20260422_174342.pt",
-    "deep_unfolding": "deep_unfolding/run_fixed_v1/best_model.pt",
-    "deeponet": None,  # Not trained yet
-    "fno": "fno/run_20260420/best_model.pt",
+    "attention_unet": "attention_unet/attention_unet_best_model.pt",
+    "plain_unet": "plain_unet/best_model.pt",
+    "pinn": None,  # Architecture changed - re-run: python -m models_2d.pinn.train
+    "deep_unfolding": "deep_unfolding/best_model.pt",
+    "deeponet": "deeponet/best_model.pt",
+    "fno": "fno/best_model.pt",
     "2d_ilt": None,  # ILT doesn't require a checkpoint
 }
 

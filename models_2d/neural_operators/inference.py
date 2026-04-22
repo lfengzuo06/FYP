@@ -51,7 +51,7 @@ class InferencePipeline:
     # Default checkpoint paths
     DEFAULT_PATHS = {
         "deeponet": "checkpoints/deeponet/best_model.pt",
-        "fno": "checkpoints/fno/run_20260420/best_model.pt",
+        "fno": "checkpoints/fno/best_model.pt",
     }
 
     def __init__(

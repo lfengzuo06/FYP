@@ -147,12 +147,11 @@ class PINNInferencePipeline:
         """Find the default compatible checkpoint from bundled locations."""
         repo_root = Path(__file__).parent.parent.parent
         preferred_paths = [
-            Path(__file__).parent.parent.parent / "checkpoints" / self.DEFAULT_CHECKPOINT,
-            Path(__file__).parent.parent.parent / "training_output_2d" / "pinn" / "checkpoints" / self.DEFAULT_CHECKPOINT,
+            repo_root / "checkpoints" / "pinn" / self.DEFAULT_CHECKPOINT,
+            repo_root / "checkpoints" / "pinn" / "pinn_best_model.pt",
         ]
         scan_dirs = [
-            repo_root / "checkpoints" / "pinn_v2" / "checkpoints",
-            repo_root / "training_output_2d" / "pinn" / "checkpoints",
+            repo_root / "checkpoints" / "pinn",
         ]
 
         candidate_paths: list[Path] = []
