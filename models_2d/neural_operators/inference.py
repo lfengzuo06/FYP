@@ -47,6 +47,12 @@ class InferencePipeline:
     """
 
     MODEL_NAME = "neural_operator"
+    
+    # Default checkpoint paths
+    DEFAULT_PATHS = {
+        "deeponet": "checkpoints/deeponet/best_model.pt",
+        "fno": "checkpoints/fno/run_20260420/best_model.pt",
+    }
 
     def __init__(
         self,
@@ -61,7 +67,7 @@ class InferencePipeline:
 
         Args:
             model_type: Type of model ('deeponet' or 'fno')
-            checkpoint_path: Path to model checkpoint
+            checkpoint_path: Path to model checkpoint. If None, searches default locations.
             device: Device to use ('cuda', 'cpu', or None for auto)
             forward_model: ForwardModel2D instance
             **model_kwargs: Additional arguments for the model
@@ -82,9 +88,53 @@ class InferencePipeline:
         self.model: DeepONet2D | FNO2D | None = None
         self.model_metadata: dict[str, Any] = {}
 
-        # Load checkpoint if provided
+        # Load checkpoint
         if checkpoint_path is not None:
             self._load_model(checkpoint_path)
+        else:
+            # Try to find default checkpoint
+            checkpoint_path = self._find_default_checkpoint()
+            if checkpoint_path is not None:
+                self._load_model(checkpoint_path)
+            else:
+                raise FileNotFoundError(
+                    f"No checkpoint found for {model_type}. "
+                    f"Train the model first using 'python -m models_2d.neural_operators.train --model-type {model_type}'. "
+                    f"Or provide a checkpoint_path explicitly."
+                )
+
+    def _find_default_checkpoint(self) -> Path | None:
+        """Search for default checkpoint in common locations."""
+        root = Path(__file__).parent.parent.parent
+        
+        # Check default path first
+        default_path = self.DEFAULT_PATHS.get(self.model_type)
+        if default_path:
+            path = root / default_path
+            if path.exists():
+                return path
+        
+        # Search patterns for trained models
+        search_patterns = {
+            "deeponet": [
+                "checkpoints/deeponet/**/*.pt",
+                "**/deeponet*best*.pt",
+                "training_output_2d/neural_operators_deeponet/**/*.pt",
+            ],
+            "fno": [
+                "checkpoints/fno/**/*.pt",
+                "**/fno*best*.pt",
+                "training_output_2d/neural_operators_fno/**/*.pt",
+            ],
+        }
+        
+        for pattern in search_patterns.get(self.model_type, []):
+            matches = list(root.glob(pattern))
+            if matches:
+                # Return the most recent checkpoint
+                return sorted(matches, key=lambda p: p.stat().st_mtime)[-1]
+        
+        return None
 
     def _load_model(self, checkpoint_path: str | Path):
         """Load model from checkpoint."""

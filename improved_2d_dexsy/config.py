@@ -21,9 +21,10 @@ DEFAULT_MODEL_NAME = "attention_unet"
 DEFAULT_CHECKPOINTS = {
     "attention_unet": "attention_unet_best_model_20260411_155746.pt",
     "plain_unet": "plain_unet/checkpoints_20260419_185116/best_model.pt",
+    "pinn": "pinn_v2/checkpoints/pinn_20260422_174342.pt",
     "deep_unfolding": "deep_unfolding/run_fixed_v1/best_model.pt",
     "deeponet": None,  # Not trained yet
-    "fno": None,  # Not trained yet
+    "fno": "fno/run_20260420/best_model.pt",
     "2d_ilt": None,  # ILT doesn't require a checkpoint
 }
 

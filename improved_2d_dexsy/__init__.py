@@ -66,6 +66,16 @@ from models_2d.plain_unet import (
 )
 from models_2d.plain_unet.model import get_model as get_plain_model
 
+# Import PINN
+from models_2d.pinn.inference import PINNInferencePipeline
+from models_2d.pinn.model import PINN2D, PINNLoss
+from models_2d.pinn.train import train_model as train_pinn
+from models_2d.pinn.inference import (
+    predict as predict_pinn,
+    predict_batch as predict_batch_pinn,
+    load_trained_model as load_trained_pinn_model,
+)
+
 # Import Deep Unfolding
 from models_2d.deep_unfolding.inference import InferencePipeline as DeepUnfoldingInferencePipeline
 from models_2d.deep_unfolding.model import (
@@ -95,7 +105,7 @@ class DEXSYInferencePipeline:
     a consistent interface with model_name dispatching.
 
     Args:
-        model_name: Model type ('attention_unet', 'plain_unet', 'deep_unfolding',
+        model_name: Model type ('attention_unet', 'plain_unet', 'pinn', 'deep_unfolding',
                     'deeponet', 'fno', or '2d_ilt')
         checkpoint_path: Path to model checkpoint (not needed for ILT)
         device: Device to use ('cuda', 'cpu', or None for auto)
@@ -107,6 +117,7 @@ class DEXSYInferencePipeline:
     _MODEL_REGISTRY = {
         "attention_unet": AttentionInferencePipeline,
         "plain_unet": PlainInferencePipeline,
+        "pinn": PINNInferencePipeline,
         "deep_unfolding": DeepUnfoldingInferencePipeline,
         "deeponet": NeuralOpInferencePipeline,
         "fno": NeuralOpInferencePipeline,
@@ -363,6 +374,14 @@ __all__ = [
     "predict_plain_unet",
     "predict_batch_plain_unet",
     "train_plain_unet",
+    # PINN
+    "PINN2D",
+    "PINNLoss",
+    "PINNInferencePipeline",
+    "predict_pinn",
+    "predict_batch_pinn",
+    "train_pinn",
+    "load_trained_pinn_model",
     # Benchmarks
     "ILTInferencePipeline",
     # I/O
