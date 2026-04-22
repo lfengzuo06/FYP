@@ -27,6 +27,58 @@ from dexsy_core.preprocessing import build_model_inputs, validate_signal_grid
 from .model import PINN2D
 
 
+def _extract_state_dict(checkpoint_obj: Any) -> dict[str, torch.Tensor]:
+    """Extract a state_dict from common checkpoint formats."""
+    if isinstance(checkpoint_obj, dict) and "model_state_dict" in checkpoint_obj:
+        state_dict = checkpoint_obj["model_state_dict"]
+    else:
+        state_dict = checkpoint_obj
+
+    if not isinstance(state_dict, dict):
+        raise TypeError("Checkpoint does not contain a valid state_dict dictionary.")
+
+    return state_dict
+
+
+def _reference_state_keys() -> set[str]:
+    """Expected PINN2D parameter keys for compatibility checks."""
+    reference_model = PINN2D(signal_size=64, in_channels=3, base_filters=64)
+    return set(reference_model.state_dict().keys())
+
+
+def _checkpoint_compatibility_reason(checkpoint_path: Path) -> tuple[bool, str]:
+    """
+    Validate whether a checkpoint matches the current PINN2D architecture.
+
+    This prevents accidentally loading legacy PINN checkpoints from a different
+    architecture variant that share the same `pinn_*.pt` naming pattern.
+    """
+    try:
+        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+    except Exception as exc:  # pragma: no cover - defensive against corrupt files
+        return False, f"cannot be loaded ({type(exc).__name__}: {exc})"
+
+    try:
+        state_dict = _extract_state_dict(checkpoint)
+    except TypeError as exc:
+        return False, str(exc)
+
+    state_keys = set(state_dict.keys())
+    expected_keys = _reference_state_keys()
+    overlap = len(state_keys & expected_keys)
+    overlap_ratio = overlap / max(len(expected_keys), 1)
+
+    if overlap_ratio < 0.9:
+        sample_keys = ", ".join(list(state_dict.keys())[:5])
+        return (
+            False,
+            f"incompatible state_dict keys (matched {overlap}/{len(expected_keys)}). "
+            f"Sample checkpoint keys: [{sample_keys}]",
+        )
+
+    return True, "compatible"
+
+
 @dataclass
 class PredictionResult:
     """Structured output for one reconstructed 2D DEXSY prediction."""
@@ -75,6 +127,7 @@ class PINNInferencePipeline:
             forward_model: ForwardModel2D instance (creates new if None)
         """
         self.forward_model = forward_model or ForwardModel2D(n_d=64, n_b=64)
+        self._incompatible_checkpoints: list[tuple[Path, str]] = []
 
         # Resolve checkpoint path
         if checkpoint_path is None:
@@ -91,36 +144,71 @@ class PINNInferencePipeline:
         self.model, self.model_metadata = self._load_model()
 
     def _find_default_checkpoint(self) -> Path | None:
-        """Find the default checkpoint from bundled locations."""
-        possible_paths = [
+        """Find the default compatible checkpoint from bundled locations."""
+        repo_root = Path(__file__).parent.parent.parent
+        preferred_paths = [
             Path(__file__).parent.parent.parent / "checkpoints" / self.DEFAULT_CHECKPOINT,
             Path(__file__).parent.parent.parent / "training_output_2d" / "pinn" / "checkpoints" / self.DEFAULT_CHECKPOINT,
         ]
+        scan_dirs = [
+            repo_root / "checkpoints" / "pinn_v2" / "checkpoints",
+            repo_root / "training_output_2d" / "pinn" / "checkpoints",
+        ]
 
-        for p in possible_paths:
+        candidate_paths: list[Path] = []
+        for p in preferred_paths:
             if p.exists():
-                return p
+                candidate_paths.append(p)
 
-        # Try to find any PINN checkpoint
-        checkpoint_dir = Path(__file__).parent.parent.parent / "training_output_2d" / "pinn" / "checkpoints"
-        if checkpoint_dir.exists():
-            checkpoints = list(checkpoint_dir.glob("pinn_*.pt"))
-            if checkpoints:
-                return sorted(checkpoints)[-1]
+        scanned_paths: list[Path] = []
+        for checkpoint_dir in scan_dirs:
+            if checkpoint_dir.exists():
+                scanned_paths.extend(checkpoint_dir.glob("pinn_*.pt"))
+
+        # Newest first (mtime), keep deterministic tiebreaker by name.
+        scanned_paths.sort(key=lambda path: (path.stat().st_mtime, path.name), reverse=True)
+
+        # Deduplicate while preserving order.
+        seen = set()
+        for path in candidate_paths + scanned_paths:
+            if path in seen:
+                continue
+            seen.add(path)
+            compatible, reason = _checkpoint_compatibility_reason(path)
+            if compatible:
+                return path
+            self._incompatible_checkpoints.append((path, reason))
 
         return None
 
     def _load_model(self) -> tuple:
         """Load the trained model from checkpoint."""
         if self.checkpoint_path is None or not self.checkpoint_path.exists():
+            incompat_summary = ""
+            if self._incompatible_checkpoints:
+                details = "\n".join(
+                    f"  - {path}: {reason}"
+                    for path, reason in self._incompatible_checkpoints
+                )
+                incompat_summary = f"\nFound PINN checkpoints but they are incompatible:\n{details}\n"
             raise FileNotFoundError(
                 f"PINN checkpoint not found at: {self.checkpoint_path}. "
                 f"Please train the model first using 'python -m models_2d.pinn.train' "
                 f"or provide a valid checkpoint path via checkpoint_path argument."
+                f"{incompat_summary}"
             )
 
-        checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
-        state_dict = checkpoint.get('model_state_dict', checkpoint)
+        compatible, reason = _checkpoint_compatibility_reason(self.checkpoint_path)
+        if not compatible:
+            raise RuntimeError(
+                f"PINN checkpoint is incompatible with current PINN2D architecture: "
+                f"{self.checkpoint_path}\nReason: {reason}\n"
+                "Use a compatible checkpoint (e.g. checkpoints/pinn_v2/checkpoints/pinn_*.pt) "
+                "or retrain with the current code."
+            )
+
+        checkpoint = torch.load(self.checkpoint_path, map_location=self.device, weights_only=False)
+        state_dict = _extract_state_dict(checkpoint)
         config = checkpoint.get('config', {})
 
         # Create model with config
@@ -461,8 +549,14 @@ def load_trained_model(
         device = torch.device(device)
 
     checkpoint_path = Path(checkpoint_path)
-    checkpoint = torch.load(checkpoint_path, map_location=device)
-    state_dict = checkpoint.get('model_state_dict', checkpoint)
+    compatible, reason = _checkpoint_compatibility_reason(checkpoint_path)
+    if not compatible:
+        raise RuntimeError(
+            f"Incompatible PINN checkpoint: {checkpoint_path}\nReason: {reason}"
+        )
+
+    checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+    state_dict = _extract_state_dict(checkpoint)
     config = checkpoint.get('config', {})
 
     model = PINN2D(

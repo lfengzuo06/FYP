@@ -233,6 +233,9 @@ def train_model(
         'signal_size': forward_model.n_b,
         'in_channels': 3,
         'base_filters': 64,
+        'model_name': 'pinn',
+        'architecture': 'simple_encoder_decoder_v2',
+        'checkpoint_format_version': 2,
     }
 
     # Print model info
@@ -263,10 +266,14 @@ def train_model(
     # Load checkpoint if provided
     start_epoch = 0
     if checkpoint_path:
-        checkpoint = torch.load(checkpoint_path, map_location=device)
-        model.load_state_dict(checkpoint['model_state_dict'])
-        optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        start_epoch = checkpoint.get('epoch', 0)
+        checkpoint = torch.load(checkpoint_path, map_location=device, weights_only=False)
+        state_dict = checkpoint.get('model_state_dict', checkpoint)
+        model.load_state_dict(state_dict)
+
+        if isinstance(checkpoint, dict) and 'optimizer_state_dict' in checkpoint:
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+        start_epoch = checkpoint.get('epoch', checkpoint.get('config', {}).get('epoch', 0))
         print(f"Loaded checkpoint from epoch {start_epoch}")
 
     # Training loop
@@ -357,6 +364,9 @@ def train_model(
     
     torch.save({
         'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': optimizer.state_dict(),
+        'epoch': epochs,
+        'val_loss': best_val_loss,
         'config': {
             **model_config,
             'epoch': epochs,
