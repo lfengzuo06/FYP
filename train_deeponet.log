@@ -1,0 +1,91 @@
+
+============================================================
+Neural Operator Training (DEEPONET)
+============================================================
+Device: cuda
+Epochs: 60, Batch size: 8
+Learning rate: 0.001, Weight decay: 0.0001
+
+Generating datasets...
+  train: 9500 samples, signal range [0.0000, 1.0821], label range [0.0000, 0.6542]
+  val: 400 samples, signal range [0.0016, 1.0799], label range [0.0000, 0.5132]
+  test: 100 samples, signal range [0.0008, 1.0553], label range [0.0000, 0.5441]
+
+Model architecture:
+  Signal input dim: 4096
+  Grid size: 64
+  Output scale init: 0.0100
+  Sample output range: [0.000238, 0.000251]
+
+Starting training from epoch 0...
+Epoch   1/60 | Train: 2.2545 | Val: 1.6707 | LR: 1.00e-03 | 6.3s (improved)
+Epoch   2/60 | Train: 1.6530 | Val: 1.3531 | LR: 1.00e-03 | 5.8s (improved)
+Epoch   3/60 | Train: 1.4476 | Val: 1.5338 | LR: 1.00e-03 | 5.8s
+Epoch   4/60 | Train: 1.2682 | Val: 1.2206 | LR: 1.00e-03 | 5.8s (improved)
+Epoch   5/60 | Train: 1.1582 | Val: 1.2862 | LR: 1.00e-03 | 5.8s
+Epoch   6/60 | Train: 1.0889 | Val: 0.9246 | LR: 1.00e-03 | 5.8s (improved)
+Epoch   7/60 | Train: 1.0022 | Val: 1.1638 | LR: 1.00e-03 | 5.8s
+Epoch   8/60 | Train: 0.9139 | Val: 0.8729 | LR: 1.00e-03 | 5.8s (improved)
+Epoch   9/60 | Train: 0.9193 | Val: 1.0091 | LR: 1.00e-03 | 5.8s
+Epoch  10/60 | Train: 0.9071 | Val: 0.8533 | LR: 1.00e-03 | 5.8s (improved)
+Epoch  11/60 | Train: 0.8358 | Val: 1.0886 | LR: 1.00e-03 | 5.8s
+Epoch  12/60 | Train: 0.8091 | Val: 0.7614 | LR: 1.00e-03 | 5.8s (improved)
+Epoch  13/60 | Train: 0.7939 | Val: 0.7854 | LR: 1.00e-03 | 5.8s
+Epoch  14/60 | Train: 0.7449 | Val: 0.5098 | LR: 1.00e-03 | 5.8s (improved)
+Epoch  15/60 | Train: 0.7728 | Val: 1.0879 | LR: 1.00e-03 | 5.8s
+Epoch  16/60 | Train: 0.7513 | Val: 0.9394 | LR: 1.00e-03 | 5.7s
+Epoch  17/60 | Train: 0.6970 | Val: 0.6698 | LR: 1.00e-03 | 5.7s
+Epoch  18/60 | Train: 0.6986 | Val: 0.4798 | LR: 1.00e-03 | 5.7s (improved)
+Epoch  19/60 | Train: 0.6559 | Val: 0.4599 | LR: 1.00e-03 | 5.7s (improved)
+Epoch  20/60 | Train: 0.6556 | Val: 0.5646 | LR: 1.00e-03 | 5.7s
+Epoch  21/60 | Train: 0.6684 | Val: 0.5966 | LR: 1.00e-03 | 5.7s
+Epoch  22/60 | Train: 0.6744 | Val: 0.8616 | LR: 1.00e-03 | 5.7s
+Epoch  23/60 | Train: 0.6414 | Val: 0.5867 | LR: 1.00e-03 | 5.7s
+Epoch  24/60 | Train: 0.6436 | Val: 0.5015 | LR: 1.00e-03 | 5.7s
+Epoch  25/60 | Train: 0.6185 | Val: 0.4973 | LR: 5.00e-04 | 5.7s
+Epoch  26/60 | Train: 0.5105 | Val: 0.3919 | LR: 5.00e-04 | 5.7s (improved)
+Epoch  27/60 | Train: 0.4564 | Val: 0.3907 | LR: 5.00e-04 | 5.7s (improved)
+Epoch  28/60 | Train: 0.4610 | Val: 0.4012 | LR: 5.00e-04 | 5.7s
+Epoch  29/60 | Train: 0.4433 | Val: 0.4454 | LR: 5.00e-04 | 5.7s
+Epoch  30/60 | Train: 0.4534 | Val: 0.5072 | LR: 5.00e-04 | 5.7s
+Epoch  31/60 | Train: 0.4418 | Val: 0.6060 | LR: 5.00e-04 | 5.7s
+Epoch  32/60 | Train: 0.4375 | Val: 0.3964 | LR: 5.00e-04 | 5.7s
+Epoch  33/60 | Train: 0.4517 | Val: 0.4879 | LR: 2.50e-04 | 5.7s
+Epoch  34/60 | Train: 0.3511 | Val: 0.4197 | LR: 2.50e-04 | 5.7s
+Epoch  35/60 | Train: 0.3447 | Val: 0.4138 | LR: 2.50e-04 | 5.7s
+Epoch  36/60 | Train: 0.3470 | Val: 0.2698 | LR: 2.50e-04 | 5.7s (improved)
+Epoch  37/60 | Train: 0.3291 | Val: 0.2860 | LR: 2.50e-04 | 5.7s
+Epoch  38/60 | Train: 0.3342 | Val: 0.2461 | LR: 2.50e-04 | 5.7s (improved)
+Epoch  39/60 | Train: 0.3413 | Val: 0.3253 | LR: 2.50e-04 | 5.7s
+Epoch  40/60 | Train: 0.3428 | Val: 0.2849 | LR: 2.50e-04 | 5.7s
+Epoch  41/60 | Train: 0.3305 | Val: 0.4386 | LR: 2.50e-04 | 5.7s
+Epoch  42/60 | Train: 0.3212 | Val: 0.2668 | LR: 2.50e-04 | 5.7s
+Epoch  43/60 | Train: 0.3295 | Val: 0.5059 | LR: 2.50e-04 | 5.7s
+Epoch  44/60 | Train: 0.3290 | Val: 0.2550 | LR: 1.25e-04 | 5.7s
+Epoch  45/60 | Train: 0.2783 | Val: 0.2388 | LR: 1.25e-04 | 5.7s (improved)
+Epoch  46/60 | Train: 0.2823 | Val: 0.2578 | LR: 1.25e-04 | 5.7s
+Epoch  47/60 | Train: 0.2765 | Val: 0.2420 | LR: 1.25e-04 | 5.7s
+Epoch  48/60 | Train: 0.2753 | Val: 0.2482 | LR: 1.25e-04 | 5.7s
+Epoch  49/60 | Train: 0.2700 | Val: 0.2300 | LR: 1.25e-04 | 5.7s (improved)
+Epoch  50/60 | Train: 0.2691 | Val: 0.2466 | LR: 1.25e-04 | 5.7s
+Epoch  51/60 | Train: 0.2703 | Val: 0.2020 | LR: 1.25e-04 | 5.6s (improved)
+Epoch  52/60 | Train: 0.2772 | Val: 0.2216 | LR: 1.25e-04 | 5.7s
+Epoch  53/60 | Train: 0.2695 | Val: 0.2923 | LR: 1.25e-04 | 5.7s
+Epoch  54/60 | Train: 0.2690 | Val: 0.2091 | LR: 1.25e-04 | 5.7s
+Epoch  55/60 | Train: 0.2721 | Val: 0.2108 | LR: 1.25e-04 | 5.7s
+Epoch  56/60 | Train: 0.2698 | Val: 0.2162 | LR: 1.25e-04 | 5.7s
+Epoch  57/60 | Train: 0.2791 | Val: 0.2720 | LR: 6.25e-05 | 5.7s
+Epoch  58/60 | Train: 0.2444 | Val: 0.1923 | LR: 6.25e-05 | 5.8s (improved)
+Epoch  59/60 | Train: 0.2319 | Val: 0.1984 | LR: 6.25e-05 | 5.7s
+Epoch  60/60 | Train: 0.2326 | Val: 0.1882 | LR: 6.25e-05 | 5.7s (improved)
+
+Best model saved to checkpoints/deeponet/run_20260422/best_model.pt
+
+============================================================
+Test Results
+============================================================
+Test loss: 0.2651
+Test DEI: mean=0.1340, std=0.1806
+Test DEI range: [0.0031, 0.7313]
+GT DEI: mean=0.1267, std=0.1801
+DEI MAE (pred vs GT): 0.0190
