@@ -12,6 +12,15 @@ Usage:
     evaluator = BenchmarkEvaluator(n_test=500, seed=42)
     results = evaluator.evaluate_model(model_pipeline, test_dataset)
     table = evaluator.generate_comparison_table()
+
+Visualization:
+    from benchmarks_2d.evaluator import plot_training_curves, plot_sample_comparison
+
+    # Plot training curves for all models
+    plot_training_curves(output_dir="outputs/benchmark/training_curves")
+
+    # Plot sample comparison
+    plot_sample_comparison(n_samples=10, output_dir="outputs/benchmark/samples")
 """
 
 from __future__ import annotations
@@ -20,6 +29,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 import time
+import re
 
 import numpy as np
 import pandas as pd
@@ -569,6 +579,334 @@ def evaluate_all_models(
     print(evaluator.generate_comparison_table().to_string(index=False))
     
     return evaluator.model_results
+
+
+def parse_training_log(log_path: Path) -> dict[str, list]:
+    """Parse training log file and extract train/val losses."""
+    if not log_path.exists():
+        return {"epochs": [], "train_loss": [], "val_loss": [], "model_name": log_path.stem}
+
+    epochs = []
+    train_losses = []
+    val_losses = []
+    model_name = log_path.stem
+
+    # Try to extract model name from log content
+    content = log_path.read_text()
+
+    # Parse different log formats
+    # Format 1: Epoch   1/60 | Train: 2.3105 | Val: 0.9969
+    pattern1 = re.compile(r'Epoch\s+(\d+)/\d+\s+\|\s+Train:\s+([\d.]+)\s+\|\s+Val:\s+([\d.]+)')
+    # Format 2: Epoch   1/60 | Train Loss: 1.394540 | Val Loss: 0.743333
+    pattern2 = re.compile(r'Epoch\s+(\d+)/\d+\s+\|\s+Train Loss:\s+([\d.]+)\s+\|\s+Val Loss:\s+([\d.]+)')
+
+    for match in pattern1.finditer(content):
+        epochs.append(int(match.group(1)))
+        train_losses.append(float(match.group(2)))
+        val_losses.append(float(match.group(3)))
+
+    for match in pattern2.finditer(content):
+        epochs.append(int(match.group(1)))
+        train_losses.append(float(match.group(2)))
+        val_losses.append(float(match.group(3)))
+
+    return {
+        "epochs": epochs,
+        "train_loss": train_losses,
+        "val_loss": val_losses,
+        "model_name": model_name,
+    }
+
+
+def get_available_training_logs() -> dict[str, Path]:
+    """Find all available training log files."""
+    repo_root = Path(__file__).parent.parent
+    log_files = {}
+
+    # Known log file locations
+    candidates = [
+        ("attention_unet", repo_root / "improved_2d_dexsy" / "train_log.txt"),
+        ("fno", repo_root / "train_fno.log"),
+        ("deeponet", repo_root / "train_deeponet.log"),
+        ("pinn", repo_root / "train_pinn.log"),
+        # Also check training_output directories
+        ("fno", repo_root / "training_output_2d" / "neural_operators_fno" / "training.log"),
+        ("deeponet", repo_root / "training_output_2d" / "neural_operators_deeponet" / "training.log"),
+        ("pinn", repo_root / "training_output_2d" / "pinn" / "training.log"),
+    ]
+
+    for item in candidates:
+        model_name, path = item if isinstance(item, tuple) else (None, item)
+        if path.exists():
+            if model_name is None:
+                model_name = path.stem.replace("_log", "").replace("train_", "")
+            log_files[model_name] = path
+
+    return log_files
+
+
+def plot_training_curves(output_dir: Path | str | None = None, save: bool = True) -> list[plt.Figure]:
+    """
+    Plot training and validation loss curves for all available models.
+
+    Args:
+        output_dir: Directory to save figures
+        save: Whether to save figures to disk
+
+    Returns:
+        List of matplotlib Figures
+    """
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        if save:
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+    log_files = get_available_training_logs()
+    figures = []
+
+    if not log_files:
+        print("Warning: No training logs found")
+        return figures
+
+    # Create individual plots for each model
+    for model_name, log_path in log_files.items():
+        data = parse_training_log(log_path)
+
+        if not data["epochs"]:
+            print(f"Warning: No data found in {log_path}")
+            continue
+
+        fig, ax = plt.subplots(figsize=(10, 6))
+        ax.plot(data["epochs"], data["train_loss"], label="Train Loss", linewidth=2)
+        ax.plot(data["epochs"], data["val_loss"], label="Val Loss", linewidth=2)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.set_title(f"Training Curves - {model_name.upper()}")
+        ax.legend()
+        ax.grid(True, alpha=0.3)
+        fig.tight_layout()
+
+        if save and output_dir is not None:
+            fig.savefig(output_dir / f"training_curve_{model_name}.png", dpi=150, bbox_inches='tight')
+
+        figures.append(fig)
+
+    # Create combined comparison plot
+    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
+    axes = axes.flatten()
+
+    for idx, (model_name, log_path) in enumerate(log_files.items()):
+        if idx >= len(axes):
+            break
+
+        data = parse_training_log(log_path)
+
+        if not data["epochs"]:
+            continue
+
+        ax = axes[idx]
+        ax.plot(data["epochs"], data["train_loss"], label="Train", linewidth=2)
+        ax.plot(data["epochs"], data["val_loss"], label="Val", linewidth=2)
+        ax.set_xlabel("Epoch")
+        ax.set_ylabel("Loss")
+        ax.set_title(model_name.upper())
+        ax.legend(fontsize=8)
+        ax.grid(True, alpha=0.3)
+
+    # Hide unused subplots
+    for idx in range(len(log_files), len(axes)):
+        axes[idx].axis('off')
+
+    fig.suptitle("Training Curves Comparison", fontsize=14)
+    fig.tight_layout()
+
+    if save and output_dir is not None:
+        fig.savefig(output_dir / "training_curves_comparison.png", dpi=150, bbox_inches='tight')
+
+    figures.append(fig)
+
+    if save:
+        plt.close('all')
+
+    print(f"Training curves saved to: {output_dir}")
+    return figures
+
+
+def plot_sample_comparison(
+    n_samples: int = 10,
+    seed: int = 42,
+    output_dir: Path | str | None = None,
+    save: bool = True,
+) -> list[plt.Figure]:
+    """
+    Generate comparison figures for sample predictions across all models.
+
+    Each figure shows:
+    - Input signal
+    - Ground truth spectrum
+    - Reconstructed spectrum from each model with MSE, DEI, and inference time
+
+    Args:
+        n_samples: Number of samples to visualize
+        seed: Random seed for reproducibility
+        output_dir: Directory to save figures
+        save: Whether to save figures to disk
+
+    Returns:
+        List of matplotlib Figures
+    """
+    if output_dir is not None:
+        output_dir = Path(output_dir)
+        if save:
+            output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Generate test dataset
+    np.random.seed(seed)
+    fm = ForwardModel2D(n_d=64, n_b=64)
+
+    # Generate samples
+    signals = []
+    ground_truths = []
+    for _ in range(n_samples):
+        generated = fm.generate_sample(n_compartments=2, return_reference_signal=True)
+        # Handle both batched and unbatched return formats
+        if len(generated) == 4:
+            F, S, _, S_clean = generated
+        else:
+            F, S, _ = generated
+        
+        # Handle both batched (N, H, W) and unbatched (H, W) shapes
+        if F.ndim == 3:
+            F = F[0]
+        if S.ndim == 3:
+            S = S[0]
+        
+        signals.append(S)
+        ground_truths.append(F)
+
+    signals = np.array(signals)
+    ground_truths = np.array(ground_truths)
+
+    print(f"Generated {n_samples} samples: signals shape {signals.shape}, ground truths shape {ground_truths.shape}")
+
+    # Collect all model pipelines
+    from models_2d.attention_unet import InferencePipeline as AttentionPipeline
+    from models_2d.plain_unet import InferencePipeline as PlainPipeline
+    from models_2d.deep_unfolding import InferencePipeline as DeepPipeline
+    from models_2d.neural_operators.inference import InferencePipeline as NeuralPipeline
+    from benchmarks_2d.ilt_baseline import ILTInferencePipeline
+
+    models = []
+    model_names = []
+
+    # Add ILT first
+    try:
+        models.append(("2d_ilt", ILTInferencePipeline()))
+        model_names.append("2d_ilt")
+    except Exception:
+        pass
+
+    # Add neural operators
+    for model_type, display_name in [("fno", "fno"), ("deeponet", "deeponet")]:
+        try:
+            pipeline = NeuralPipeline(model_type=model_type)
+            models.append((display_name, pipeline))
+            model_names.append(display_name)
+        except FileNotFoundError:
+            pass
+
+    # Add CNN-based models
+    for model_cls, name in [(AttentionPipeline, "attention_unet"), (PlainPipeline, "plain_unet")]:
+        try:
+            pipeline = model_cls()
+            models.append((name, pipeline))
+            model_names.append(name)
+        except FileNotFoundError:
+            pass
+
+    try:
+        pipeline = DeepPipeline()
+        models.append(("deep_unfolding", pipeline))
+        model_names.append("deep_unfolding")
+    except FileNotFoundError:
+        pass
+
+    figures = []
+
+    # Create one figure per sample
+    for i in range(n_samples):
+        signal = signals[i]
+        gt = ground_truths[i]
+
+        # Number of columns: signal, gt, + one per model
+        n_cols = 2 + len(models)
+        fig, axes = plt.subplots(2, n_cols, figsize=(4 * n_cols, 8))
+
+        # Row 0: Signal and Ground Truth
+        ax = axes[0, 0]
+        im = ax.imshow(signal, cmap="viridis", origin="lower")
+        ax.set_title("Input Signal")
+        ax.set_xlabel("b2")
+        ax.set_ylabel("b1")
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+        ax = axes[0, 1]
+        im = ax.imshow(gt, cmap="magma", origin="lower")
+        ax.set_title("Ground Truth")
+        ax.set_xlabel("D2")
+        ax.set_ylabel("D1")
+        gt_dei = compute_dei(gt)
+        ax.text(0.5, -0.15, f"DEI={gt_dei:.4f}", transform=ax.transAxes, ha='center')
+        plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+        # Row 1: Model predictions (each model gets its own column)
+        for col_idx, (model_name, pipeline) in enumerate(models):
+            ax = axes[1, col_idx]
+
+            start_time = time.time()
+            result = pipeline.predict(signal)
+            infer_time = time.time() - start_time
+
+            pred = result.reconstructed_spectrum
+
+            # Normalize for comparison
+            gt_norm = gt / (gt.sum() + 1e-10)
+
+            im = ax.imshow(pred, cmap="magma", origin="lower")
+            ax.set_title(model_name.upper())
+
+            # Compute metrics
+            mse = float(np.mean((pred - gt_norm) ** 2))
+            pred_dei = compute_dei(pred)
+            dei_error = abs(pred_dei - gt_dei)
+
+            # Add metrics text
+            metrics_text = f"MSE={mse:.2e}\nDEI={pred_dei:.4f}\nDEI Err={dei_error:.4f}\nTime={infer_time*1000:.1f}ms"
+            ax.text(0.5, -0.25, metrics_text, transform=ax.transAxes, ha='center', fontsize=9)
+
+            ax.set_xlabel("D2")
+            ax.set_ylabel("D1")
+            plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+        # Hide extra columns if any
+        for col_idx in range(len(models), axes.shape[1]):
+            axes[0, col_idx].axis('off')
+            if len(axes) > 1:
+                axes[1, col_idx].axis('off')
+
+        fig.suptitle(f"Sample {i+1}/{n_samples}", fontsize=14)
+        fig.tight_layout()
+
+        if save and output_dir is not None:
+            fig.savefig(output_dir / f"sample_{i:03d}.png", dpi=150, bbox_inches='tight')
+
+        figures.append(fig)
+
+    if save:
+        plt.close('all')
+
+    print(f"Sample comparison figures saved to: {output_dir}")
+    return figures
 
 
 if __name__ == "__main__":

@@ -31,6 +31,9 @@ from .evaluator import (
     MetricsResult,
     ModelBenchmarkResult,
     evaluate_all_models,
+    plot_training_curves,
+    plot_sample_comparison,
+    parse_training_log,
 )
 
 __all__ = [
@@ -44,4 +47,8 @@ __all__ = [
     "MetricsResult",
     "ModelBenchmarkResult",
     "evaluate_all_models",
+    # Visualization
+    "plot_training_curves",
+    "plot_sample_comparison",
+    "parse_training_log",
 ]

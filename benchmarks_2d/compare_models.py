@@ -14,6 +14,9 @@ Usage:
     # Run with custom test size
     python -m benchmarks_2d.compare_models --n-test 500
 
+    # Generate visualizations
+    python -m benchmarks_2d.compare_models --generate-plots
+
     # Skip specific models
     python -m benchmarks_2d.compare_models --skip attention_unet --skip plain_unet
 """
@@ -35,6 +38,8 @@ from benchmarks_2d.evaluator import (
     BenchmarkEvaluator,
     evaluate_all_models,
     ModelBenchmarkResult,
+    plot_training_curves,
+    plot_sample_comparison,
 )
 
 
@@ -98,6 +103,17 @@ def build_parser() -> argparse.ArgumentParser:
         "--verbose",
         action="store_true",
         help="Print detailed progress",
+    )
+    parser.add_argument(
+        "--generate-plots",
+        action="store_true",
+        help="Generate training curves and sample comparison plots",
+    )
+    parser.add_argument(
+        "--n-samples-plot",
+        type=int,
+        default=10,
+        help="Number of samples for visualization plots (default: 10)",
     )
     return parser
 
@@ -168,7 +184,31 @@ def main() -> int:
     if not args.no_save:
         saved_path = evaluator.save_results(output_dir)
         print(f"Results saved to: {saved_path}")
-    
+
+        # Generate visualizations
+        if args.generate_plots:
+            print()
+            print("Generating visualizations...")
+            print("-" * 40)
+
+            # Training curves
+            training_dir = output_dir / "training_curves"
+            print(f"Generating training curves...")
+            plot_training_curves(output_dir=training_dir, save=True)
+
+            # Sample comparison
+            samples_dir = output_dir / "sample_comparisons"
+            print(f"Generating sample comparison plots ({args.n_samples_plot} samples)...")
+            plot_sample_comparison(
+                n_samples=args.n_samples_plot,
+                seed=args.seed,
+                output_dir=samples_dir,
+                save=True,
+            )
+
+            print("-" * 40)
+            print(f"Visualizations saved to: {output_dir}")
+
     print()
     print("Benchmark complete!")
     return 0
