@@ -21,7 +21,7 @@ DEFAULT_MODEL_NAME = "attention_unet"
 DEFAULT_CHECKPOINTS = {
     "attention_unet": "attention_unet/attention_unet_best_model.pt",
     "plain_unet": "plain_unet/best_model.pt",
-    "pinn": None,  # Architecture changed - re-run: python -m models_2d.pinn.train
+    "pinn": "pinn_run_20260422/checkpoints/pinn_20260422_220103.pt",
     "deep_unfolding": "deep_unfolding/best_model.pt",
     "deeponet": "deeponet/best_model.pt",
     "fno": "fno/best_model.pt",
