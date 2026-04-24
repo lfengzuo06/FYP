@@ -593,13 +593,11 @@ def build_app():
                                         minimum=5e-12, maximum=3e-11,
                                         value=1e-11, step=1e-12,
                                         label="D1 (Intracellular, m²/s)",
-                                        format="%.2e",
                                     )
                                     diffusion_2 = gr.Slider(
                                         minimum=3e-11, maximum=5e-9,
                                         value=1e-9, step=1e-10,
                                         label="D2 (Extracellular, m²/s)",
-                                        format="%.2e",
                                     )
                                     volume_fraction = gr.Slider(
                                         minimum=0.1, maximum=0.9,
@@ -625,11 +623,11 @@ def build_app():
                                 with gr.Group(visible=False) as params_3c:
                                     gr.Markdown("**3-Compartment Parameters**")
                                     d1_3c = gr.Slider(5e-12, 3e-11, value=1e-11, step=1e-12,
-                                                      label="D1 (Intracellular)", format="%.2e")
+                                                      label="D1 (Intracellular)")
                                     d2_3c = gr.Slider(3e-11, 5e-9, value=5e-10, step=1e-10,
-                                                      label="D2 (Extracellular)", format="%.2e")
+                                                      label="D2 (Extracellular)")
                                     d3_3c = gr.Slider(5e-9, 5e-8, value=1e-8, step=1e-9,
-                                                      label="D3 (Fast)", format="%.2e")
+                                                      label="D3 (Fast)")
                                     vf1_3c = gr.Slider(0.1, 0.8, value=0.3, step=0.05,
                                                        label="Volume Fraction 1")
                                     vf3_3c = gr.Slider(0.05, 0.5, value=0.2, step=0.05,
