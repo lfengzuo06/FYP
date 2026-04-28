@@ -1,0 +1,78 @@
+<frozen runpy>:128: RuntimeWarning: 'models_3d.attention_unet.train' found in sys.modules after import of package 'models_3d.attention_unet', but prior to execution of 'models_3d.attention_unet.train'; this may result in unpredictable behaviour
+Using device: cuda
+Generating 3C datasets (n_compartments=3)...
+  train: 9500 samples, noisy signal range [0.0001, 1.0590], label range [0.0000, 0.5546]
+  val: 400 samples, noisy signal range [0.0006, 1.0424], label range [0.0000, 0.4510]
+  test: 100 samples, noisy signal range [0.0001, 1.0345], label range [0.0000, 0.5199]
+Model: AttentionUNet3C
+  Input channels: 3
+  Base filters: 32
+  Parameters: 6,037,924
+
+Training Attention U-Net on 3C data...
+  Training samples: 9500
+  Validation samples: 400
+  Epochs: 60, Batch size: 8
+============================================================
+Epoch   1/60 | Train: 1.734463 | Val: 1.185052 | LR: 5.00e-04 | Time: 48.5s
+Epoch   2/60 | Train: 0.994629 | Val: 0.928822 | LR: 5.00e-04 | Time: 48.9s
+Epoch   3/60 | Train: 0.727443 | Val: 0.578583 | LR: 5.00e-04 | Time: 51.7s
+Epoch   4/60 | Train: 0.603636 | Val: 0.523864 | LR: 5.00e-04 | Time: 51.3s
+Epoch   5/60 | Train: 0.544255 | Val: 0.533705 | LR: 5.00e-04 | Time: 51.7s
+Epoch   6/60 | Train: 0.506569 | Val: 0.477496 | LR: 5.00e-04 | Time: 51.5s
+Epoch   7/60 | Train: 0.468657 | Val: 0.437072 | LR: 5.00e-04 | Time: 51.5s
+Epoch   8/60 | Train: 0.440187 | Val: 0.412808 | LR: 5.00e-04 | Time: 51.5s
+Epoch   9/60 | Train: 0.426851 | Val: 0.380984 | LR: 5.00e-04 | Time: 51.6s
+Epoch  10/60 | Train: 0.409376 | Val: 0.358553 | LR: 5.00e-04 | Time: 51.7s
+Epoch  11/60 | Train: 0.400794 | Val: 0.328904 | LR: 5.00e-04 | Time: 51.6s
+Epoch  12/60 | Train: 0.383341 | Val: 0.368680 | LR: 5.00e-04 | Time: 51.6s
+Epoch  13/60 | Train: 0.376601 | Val: 0.342847 | LR: 5.00e-04 | Time: 51.4s
+Epoch  14/60 | Train: 0.363746 | Val: 0.309684 | LR: 5.00e-04 | Time: 51.7s
+Epoch  15/60 | Train: 0.348853 | Val: 0.354099 | LR: 5.00e-04 | Time: 51.4s
+Epoch  16/60 | Train: 0.346424 | Val: 0.322460 | LR: 5.00e-04 | Time: 51.6s
+Epoch  17/60 | Train: 0.338646 | Val: 0.293234 | LR: 5.00e-04 | Time: 51.5s
+Epoch  18/60 | Train: 0.329962 | Val: 0.338790 | LR: 5.00e-04 | Time: 51.5s
+Epoch  19/60 | Train: 0.325073 | Val: 0.335874 | LR: 5.00e-04 | Time: 51.6s
+Epoch  20/60 | Train: 0.316693 | Val: 0.386523 | LR: 5.00e-04 | Time: 51.5s
+Epoch  21/60 | Train: 0.312469 | Val: 0.292700 | LR: 5.00e-04 | Time: 51.7s
+Epoch  22/60 | Train: 0.313017 | Val: 0.346078 | LR: 5.00e-04 | Time: 51.5s
+Epoch  23/60 | Train: 0.309334 | Val: 0.295177 | LR: 5.00e-04 | Time: 51.4s
+Epoch  24/60 | Train: 0.300476 | Val: 0.280403 | LR: 5.00e-04 | Time: 51.5s
+Epoch  25/60 | Train: 0.293324 | Val: 0.307005 | LR: 5.00e-04 | Time: 51.7s
+Epoch  26/60 | Train: 0.295296 | Val: 0.353814 | LR: 5.00e-04 | Time: 51.8s
+Epoch  27/60 | Train: 0.291075 | Val: 0.344279 | LR: 5.00e-04 | Time: 51.6s
+Epoch  28/60 | Train: 0.283832 | Val: 0.270855 | LR: 5.00e-04 | Time: 51.7s
+Epoch  29/60 | Train: 0.279806 | Val: 0.283222 | LR: 5.00e-04 | Time: 51.6s
+Epoch  30/60 | Train: 0.280415 | Val: 0.298042 | LR: 5.00e-04 | Time: 51.8s
+Epoch  31/60 | Train: 0.276384 | Val: 0.275837 | LR: 5.00e-04 | Time: 51.6s
+Epoch  32/60 | Train: 0.271513 | Val: 0.300894 | LR: 5.00e-04 | Time: 51.5s
+Epoch  33/60 | Train: 0.269762 | Val: 0.261502 | LR: 5.00e-04 | Time: 51.6s
+Epoch  34/60 | Train: 0.268843 | Val: 0.286049 | LR: 5.00e-04 | Time: 51.6s
+Epoch  35/60 | Train: 0.260403 | Val: 0.262454 | LR: 5.00e-04 | Time: 51.7s
+Epoch  36/60 | Train: 0.262011 | Val: 0.295018 | LR: 5.00e-04 | Time: 51.7s
+Epoch  37/60 | Train: 0.256100 | Val: 0.294922 | LR: 5.00e-04 | Time: 51.7s
+Epoch  38/60 | Train: 0.258800 | Val: 0.287916 | LR: 5.00e-04 | Time: 51.6s
+Epoch  39/60 | Train: 0.249919 | Val: 0.287473 | LR: 2.50e-04 | Time: 51.7s
+Epoch  40/60 | Train: 0.207993 | Val: 0.244123 | LR: 2.50e-04 | Time: 51.6s
+Epoch  41/60 | Train: 0.201505 | Val: 0.268552 | LR: 2.50e-04 | Time: 51.5s
+Epoch  42/60 | Train: 0.199613 | Val: 0.264531 | LR: 2.50e-04 | Time: 51.6s
+Epoch  43/60 | Train: 0.196548 | Val: 0.243607 | LR: 2.50e-04 | Time: 51.5s
+Epoch  44/60 | Train: 0.194997 | Val: 0.236370 | LR: 2.50e-04 | Time: 51.5s
+Epoch  45/60 | Train: 0.190577 | Val: 0.242298 | LR: 2.50e-04 | Time: 51.7s
+Epoch  46/60 | Train: 0.190783 | Val: 0.252359 | LR: 2.50e-04 | Time: 51.7s
+Epoch  47/60 | Train: 0.190208 | Val: 0.260602 | LR: 2.50e-04 | Time: 51.6s
+Epoch  48/60 | Train: 0.186662 | Val: 0.254301 | LR: 2.50e-04 | Time: 51.6s
+Epoch  49/60 | Train: 0.183872 | Val: 0.268953 | LR: 2.50e-04 | Time: 51.5s
+Epoch  50/60 | Train: 0.184620 | Val: 0.255010 | LR: 1.25e-04 | Time: 51.5s
+Epoch  51/60 | Train: 0.158420 | Val: 0.241510 | LR: 1.25e-04 | Time: 51.6s
+Epoch  52/60 | Train: 0.153441 | Val: 0.252187 | LR: 1.25e-04 | Time: 51.6s
+Epoch  53/60 | Train: 0.153137 | Val: 0.245893 | LR: 1.25e-04 | Time: 51.6s
+Epoch  54/60 | Train: 0.150484 | Val: 0.247234 | LR: 1.25e-04 | Time: 51.7s
+Epoch  55/60 | Train: 0.149605 | Val: 0.249953 | LR: 1.25e-04 | Time: 51.6s
+Epoch  56/60 | Train: 0.145591 | Val: 0.266146 | LR: 6.25e-05 | Time: 51.7s
+
+Early stopping at epoch 56
+
+Training completed in 2886.18 seconds
+Best validation loss: 0.236370 at epoch 44
+Saved checkpoints to training_output_3d/attention_unet_3c/checkpoints_20260428_164228
