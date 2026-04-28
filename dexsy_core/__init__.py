@@ -13,6 +13,7 @@ from .forward_model import (
     compute_weight_matrix_dei,
     compute_pair_blob_masses,
     compute_pair_blob_dei,
+    compute_pairwise_3c_dei,
     local_square_mask,
 )
 
@@ -22,5 +23,6 @@ __all__ = [
     "compute_weight_matrix_dei",
     "compute_pair_blob_masses",
     "compute_pair_blob_dei",
+    "compute_pairwise_3c_dei",
     "local_square_mask",
 ]

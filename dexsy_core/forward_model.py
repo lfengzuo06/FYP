@@ -612,6 +612,7 @@ class ForwardModel2D:
             "smoothing_sigma": float(used_sigma),
             "jitter_pixels": int(self.jitter_pixels if jitter_pixels is None else jitter_pixels),
             "jittered_indices": tuple(int(i) for i in jittered_indices),
+            "theoretical_dei": compute_weight_matrix_dei(weight_matrix),
         }
         if return_reference_signal:
             return f, s, params, clean_signal
@@ -784,6 +785,119 @@ class ForwardModel2D:
         }
         return f, clean_signal, params
 
+    def generate_3c_validation_spectrum(
+        self,
+        diffusions: np.ndarray,
+        volume_fractions: np.ndarray,
+        exchange_rates: tuple[float, float, float],
+        mixing_time: float,
+        *,
+        jitter_pixels: int = 0,
+        smoothing_sigma: float | None = None,
+        normalize: bool | None = True,
+    ) -> tuple:
+        """
+        Build a noise-free 3-compartment spectrum and signal for Section 3.1-style checks.
+
+        Uses the same exchange and projection path as ``generate_3compartment_paper`` so
+        validation matches the training forward model (no duplicate notebook physics).
+
+        Args:
+            diffusions: array of shape (3,) with [D_intra, D_extra, D_fast]
+            volume_fractions: array of shape (3,)
+            exchange_rates: tuple of (rate_01, rate_02, rate_12)
+            mixing_time: mixing time in seconds
+            jitter_pixels: peak jitter in pixels (default 0 for validation)
+            smoothing_sigma: Gaussian broadening sigma (default random from range)
+            normalize: whether to normalize signal by b=0 (default True)
+
+        Returns:
+            f: 64x64 spectrum
+            clean_signal: 64x64 signal
+            params: dict with ground truth metadata including:
+                - n_compartments: 3
+                - diffusions: list of 3 diffusion coefficients
+                - volume_fractions: list of 3 fractions
+                - exchange_rates: dict with keys "0-1", "0-2", "1-2"
+                - weight_matrix: 3x3 symmetric matrix
+                - theoretical_dei: exact DEI from weight matrix
+                - compartment_indices: grid indices for each compartment
+                - expected_peak_centres: dict with all 9 peak locations
+        """
+        diffusions = np.asarray(diffusions, dtype=np.float64).reshape(3)
+        volume_fractions = np.asarray(volume_fractions, dtype=np.float64).reshape(3)
+        rate_01, rate_02, rate_12 = exchange_rates
+
+        compartment_indices = tuple(int(self._nearest_diffusion_index(d)) for d in diffusions)
+        exchange_rate_matrix = np.zeros((3, 3), dtype=np.float64)
+        exchange_rate_matrix[0, 1] = exchange_rate_matrix[1, 0] = rate_01
+        exchange_rate_matrix[0, 2] = exchange_rate_matrix[2, 0] = rate_02
+        exchange_rate_matrix[1, 2] = exchange_rate_matrix[2, 1] = rate_12
+
+        f, weight_matrix, exchange_probs, used_sigma, exchange_scale, jittered_indices = self._generate_paper_spectrum(
+            diffusions=diffusions,
+            volume_fractions=volume_fractions,
+            exchange_rates=exchange_rate_matrix,
+            mixing_time=mixing_time,
+            jitter_pixels=jitter_pixels,
+            smoothing_sigma=smoothing_sigma,
+        )
+        clean_signal = self.compute_signal(f, noise_sigma=0.0, normalize=normalize, noise_model=None)
+
+        # Compute theoretical peak masses
+        theoretical_peak_masses = {
+            "diagonal_0": float(weight_matrix[0, 0]),
+            "diagonal_1": float(weight_matrix[1, 1]),
+            "diagonal_2": float(weight_matrix[2, 2]),
+            "diagonal_total": float(weight_matrix[0, 0] + weight_matrix[1, 1] + weight_matrix[2, 2]),
+            "off_diagonal_01": float(weight_matrix[0, 1] + weight_matrix[1, 0]),
+            "off_diagonal_02": float(weight_matrix[0, 2] + weight_matrix[2, 0]),
+            "off_diagonal_12": float(weight_matrix[1, 2] + weight_matrix[2, 1]),
+            "off_diagonal_total": float(
+                weight_matrix[0, 1] + weight_matrix[1, 0] +
+                weight_matrix[0, 2] + weight_matrix[2, 0] +
+                weight_matrix[1, 2] + weight_matrix[2, 1]
+            ),
+        }
+
+        params = {
+            "n_compartments": 3,
+            "mixing_time": float(mixing_time),
+            "diffusions": diffusions.tolist(),
+            "volume_fractions": volume_fractions.tolist(),
+            "exchange_rates": {
+                "0-1": float(rate_01),
+                "0-2": float(rate_02),
+                "1-2": float(rate_12),
+            },
+            "exchange_probabilities": {
+                "0-1": float(exchange_probs[0, 1]),
+                "0-2": float(exchange_probs[0, 2]),
+                "1-2": float(exchange_probs[1, 2]),
+            },
+            "smoothing_sigma": float(used_sigma),
+            "exchange_probability_scale": float(exchange_scale),
+            "weight_matrix": weight_matrix.copy(),
+            "compartment_indices": compartment_indices,
+            "expected_peak_centres": {
+                # Diagonal peaks (self-retention)
+                "peak_0_0": (compartment_indices[0], compartment_indices[0]),
+                "peak_1_1": (compartment_indices[1], compartment_indices[1]),
+                "peak_2_2": (compartment_indices[2], compartment_indices[2]),
+                # Off-diagonal peaks (exchange)
+                "peak_0_1": (compartment_indices[0], compartment_indices[1]),
+                "peak_1_0": (compartment_indices[1], compartment_indices[0]),
+                "peak_0_2": (compartment_indices[0], compartment_indices[2]),
+                "peak_2_0": (compartment_indices[2], compartment_indices[0]),
+                "peak_1_2": (compartment_indices[1], compartment_indices[2]),
+                "peak_2_1": (compartment_indices[2], compartment_indices[1]),
+            },
+            "theoretical_peak_masses": theoretical_peak_masses,
+            "theoretical_dei": compute_weight_matrix_dei(weight_matrix),
+            "jittered_indices": tuple(int(i) for i in jittered_indices),
+        }
+        return f, clean_signal, params
+
 
 def compute_dei(f: np.ndarray, diagonal_band_width: int = 5) -> float:
     """
@@ -802,6 +916,61 @@ def compute_dei(f: np.ndarray, diagonal_band_width: int = 5) -> float:
     diag_sum = float(f[diagonal_mask].sum())
     off_diag_sum = float(f[~diagonal_mask].sum())
     return off_diag_sum / (diag_sum + 1e-10)
+
+
+def compute_pairwise_3c_dei(
+    f: np.ndarray,
+    compartment_indices: tuple[int, int, int],
+    diagonal_band_width: int = 5,
+) -> dict[str, float]:
+    """
+    Compute DEI for each of the 3 pairs in a 3-compartment spectrum.
+
+    This provides a breakdown of exchange contribution from each compartment pair,
+    which is useful for understanding the exchange structure in 3C systems.
+
+    Args:
+        f: 2D spectrum array (n_d x n_d)
+        compartment_indices: tuple of 3 grid indices for compartments 0, 1, 2
+        diagonal_band_width: width of diagonal band (default 5)
+
+    Returns:
+        dict with keys:
+            - diagonal_01: diagonal mass for pair 0-1
+            - off_diagonal_01: off-diagonal mass for pair 0-1
+            - dei_01_blob: blob-based DEI for pair 0-1
+            - diagonal_02: diagonal mass for pair 0-2
+            - off_diagonal_02: off-diagonal mass for pair 0-2
+            - dei_02_blob: blob-based DEI for pair 0-2
+            - diagonal_12: diagonal mass for pair 1-2
+            - off_diagonal_12: off-diagonal mass for pair 1-2
+            - dei_12_blob: blob-based DEI for pair 1-2
+    """
+    idx0, idx1, idx2 = compartment_indices
+    radius = diagonal_band_width
+
+    result = {}
+
+    for pair_name, (i, j) in [("01", (idx0, idx1)), ("02", (idx0, idx2)), ("12", (idx1, idx2))]:
+        # Diagonal peaks for this pair
+        diag_mask = (
+            local_square_mask(f.shape, (i, i), radius) |
+            local_square_mask(f.shape, (j, j), radius)
+        )
+        diag_mass = float(f[diag_mask].sum())
+
+        # Off-diagonal peaks for this pair
+        off_mask = (
+            local_square_mask(f.shape, (i, j), radius) |
+            local_square_mask(f.shape, (j, i), radius)
+        )
+        off_mass = float(f[off_mask].sum())
+
+        result[f"diagonal_{pair_name}"] = diag_mass
+        result[f"off_diagonal_{pair_name}"] = off_mass
+        result[f"dei_{pair_name}_blob"] = off_mass / (diag_mass + 1e-10)
+
+    return result
 
 
 if __name__ == "__main__":
