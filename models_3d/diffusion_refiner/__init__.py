@@ -1,8 +1,9 @@
 """
 Diffusion Refiner for 3C Model.
 
-This module provides a conditional diffusion model that refines the output of the
-3C Attention UNet by learning to correct artifacts and fill in details.
+This module provides a conditional diffusion model for uncertainty estimation.
+The baseline UNet provides the primary prediction, and diffusion sampling
+provides uncertainty quantification.
 
 Usage:
     # Training
@@ -14,16 +15,18 @@ Usage:
         epochs=100,
     )
 
-    # Inference
-    from models_3d.diffusion_refiner import RefinementInference, load_refiner
+    # Uncertainty Estimation (new interface)
+    from models_3d.diffusion_refiner import UncertaintyEstimator, load_estimator
 
-    inference = load_refiner(
-        refiner_checkpoint='path/to/refiner.pt',
+    estimator = load_estimator(
         baseline_checkpoint='path/to/baseline.pt',
+        diffusion_checkpoint='path/to/refiner.pt',
         forward_model=forward_model,
     )
 
-    result = inference.refine(signal)
+    result = estimator.predict(signal)
+    print(f"DEI: {result.dei:.4f}, Confidence: {result.confidence:.4f}")
+    high_risk = result.get_high_risk_regions(threshold=0.9)
 
 Modules:
     config: Configuration classes for diffusion training
@@ -32,7 +35,7 @@ Modules:
     dataset: Dataset classes for refinement training
     loss: Combined loss functions
     train: Training pipeline
-    inference: Inference with uncertainty estimation
+    inference: Uncertainty estimation via diffusion sampling
     evaluate: Evaluation and comparison utilities
 """
 
@@ -60,8 +63,11 @@ from .model import (
 )
 
 from .inference import (
+    UncertaintyEstimator,
+    UncertaintyResult,
     RefinementInference,
     RefinementResult,
+    load_estimator,
     load_refiner,
 )
 
@@ -89,8 +95,6 @@ from .evaluate import (
     plot_uncertainty_calibration,
 )
 
-from .train import train_refiner
-
 __all__ = [
     # Config
     'DiffusionConfig',
@@ -109,10 +113,13 @@ __all__ = [
     'FiLMLayer',
     'ConditionalResidualDenseBlock',
     'get_denoiser',
-    # Inference
-    'RefinementInference',
-    'RefinementResult',
-    'load_refiner',
+    # Inference (Uncertainty Estimation)
+    'UncertaintyEstimator',
+    'UncertaintyResult',
+    'RefinementInference',  # Backward compatibility
+    'RefinementResult',     # Backward compatibility
+    'load_estimator',
+    'load_refiner',         # Backward compatibility
     # Dataset
     'RefinementDataset',
     'RefinementDataLoader',

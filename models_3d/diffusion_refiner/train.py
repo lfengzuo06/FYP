@@ -130,9 +130,8 @@ def evaluate_on_batch(
     f_gt = batch['f_gt'].cpu().numpy()
     signal = batch['signal'].cpu().numpy()
 
-    condition = torch.cat([
-        f_base, model_input[:, 0:1], model_input[:, 1:2], model_input[:, 2:3], f_base
-    ], dim=1)
+    # Build condition using model's method (consistent with new training logic)
+    condition = model._build_condition(f_base, model_input)
 
     x_t = torch.randn_like(f_base)
 
@@ -401,19 +400,15 @@ def train_refiner(
 
             x_t = sqrt_alpha_bar_t * f_gt + sqrt_one_minus_alpha_bar_t * noise
 
-            condition = torch.cat([
-                f_base,
-                model_input[:, 0:1],
-                model_input[:, 1:2],
-                model_input[:, 2:3],
-                f_base,
-            ], dim=1)
+            # Build condition using model's method (consistent with inference)
+            condition = model._build_condition(f_base, model_input)
 
             noise_pred = model(x_t, condition, t)
 
-            with torch.no_grad():
-                x_0_pred = (x_t - sqrt_one_minus_alpha_bar_t * noise_pred) / (sqrt_alpha_bar_t + 1e-8)
-                x_0_pred = normalize_distribution(x_0_pred)
+            # Predict x_0 from noise prediction for loss computation
+            # Allow gradients to flow through this computation
+            x_0_pred = (x_t - sqrt_one_minus_alpha_bar_t * noise_pred) / (sqrt_alpha_bar_t + 1e-8)
+            x_0_pred = normalize_distribution(x_0_pred)
 
             loss_dict = criterion(
                 noise_pred=noise_pred,
@@ -472,13 +467,7 @@ def train_refiner(
 
                     x_t = sqrt_alpha_bar_t * f_gt + sqrt_one_minus_alpha_bar_t * noise
 
-                    condition = torch.cat([
-                        f_base,
-                        model_input[:, 0:1],
-                        model_input[:, 1:2],
-                        model_input[:, 2:3],
-                        f_base,
-                    ], dim=1)
+                    condition = model._build_condition(f_base, model_input)
 
                     noise_pred = model(x_t, condition, t)
 
@@ -502,8 +491,13 @@ def train_refiner(
             eval_metrics = evaluate_on_batch(
                 model, scheduler, next(iter(val_loader)), device, num_eval_steps=20
             )
-            val_dei_p95 = eval_metrics['refined']['dei_error_p95']
+            # Use baseline (UNet) metrics for monitoring since it's now the primary output
+            val_dei_p95 = eval_metrics['baseline']['dei_error_p95']
+            val_dei_mean = eval_metrics['baseline']['dei_error_mean']
             history['val_dei_error_p95'].append(val_dei_p95)
+            if 'val_dei_error_mean' not in history:
+                history['val_dei_error_mean'] = []
+            history['val_dei_error_mean'].append(val_dei_mean)
 
             scheduler_lr.step(val_loss)
 

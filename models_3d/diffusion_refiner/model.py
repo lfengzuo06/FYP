@@ -308,6 +308,38 @@ class ConditionalUNetDenoiser(nn.Module):
 
         return noise_pred
 
+    def _build_condition(
+        self,
+        f_base: torch.Tensor,
+        model_input: torch.Tensor,
+    ) -> torch.Tensor:
+        """
+        Build conditioning tensor from baseline and model input.
+
+        Conditioning channels (5 total):
+        1. f_base (1 channel) - baseline UNet prediction
+        2. signal_raw (1 channel) - raw input signal
+        3. signal_log (1 channel) - log-transformed signal
+        4. pos_channel (1 channel) - position encoding
+        5. noise_indicator (1 channel) - indicator of expected noise level
+
+        The noise indicator helps the model understand the noise regime.
+        """
+        signal_raw = model_input[:, 0:1, :, :]
+        signal_log = model_input[:, 1:2, :, :]
+        pos_ch = model_input[:, 2:3, :, :]
+
+        # Noise level indicator: use signal variance as proxy
+        # Keep spatial dimensions for proper concatenation
+        signal_mean = signal_raw.mean(dim=(2, 3), keepdim=True)
+        signal_var = ((signal_raw - signal_mean) ** 2).mean(dim=(2, 3), keepdim=True)
+        # Broadcast to same spatial size as other channels
+        noise_indicator = signal_var.expand_as(signal_raw)
+
+        condition = torch.cat([f_base, signal_raw, signal_log, pos_ch, noise_indicator], dim=1)
+
+        return condition
+
 
 class RefinerWithBaseline(nn.Module):
     """
@@ -369,20 +401,26 @@ class RefinerWithBaseline(nn.Module):
         """
         Build conditioning tensor from baseline and model input.
 
-        Conditioning channels:
-        1. f_base (1 channel)
-        2. signal_raw (1 channel)
-        3. signal_log (1 channel)
-        4. pos_channel (1 channel)
-        5. extra channel (repetition of f_base or noise level)
+        Conditioning channels (5 total):
+        1. f_base (1 channel) - baseline UNet prediction
+        2. signal_raw (1 channel) - raw input signal
+        3. signal_log (1 channel) - log-transformed signal
+        4. pos_channel (1 channel) - position encoding
+        5. noise_indicator (1 channel) - indicator of expected noise level
 
-        Total: 5 channels
+        The noise indicator helps the model understand the noise regime.
         """
         signal_raw = model_input[:, 0:1, :, :]
         signal_log = model_input[:, 1:2, :, :]
         pos_ch = model_input[:, 2:3, :, :]
 
-        condition = torch.cat([f_base, signal_raw, signal_log, pos_ch, f_base], dim=1)
+        # Noise level indicator: use signal variance as proxy
+        # Broadcast to same spatial size as other channels
+        signal_mean = signal_raw.mean(dim=(2, 3), keepdim=True)
+        signal_var = ((signal_raw - signal_mean) ** 2).mean(dim=(2, 3), keepdim=True)
+        noise_indicator = signal_var.expand_as(signal_raw)
+
+        condition = torch.cat([f_base, signal_raw, signal_log, pos_ch, noise_indicator], dim=1)
 
         return condition
 

@@ -39,6 +39,32 @@ from .inference import RefinementInference, RefinementResult
 from .model import ConditionalUNetDenoiser
 
 
+def _normalize_spectrum(x: np.ndarray) -> np.ndarray:
+    """
+    Normalize spectrum array to valid probability distribution.
+
+    Handles shapes [H,W], [1,H,W], or [N,1,H,W] by squeezing extra dimensions.
+
+    Returns:
+        Normalized array with shape [N,H,W] for batch or [H,W] for single
+    """
+    x = np.array(x)
+
+    # Handle scalar case
+    if x.ndim == 0:
+        return x
+
+    # Remove singleton dimensions
+    while x.ndim > 2 and x.shape[-3] == 1:
+        x = x.squeeze(axis=-3)
+
+    # Ensure at least 3D for processing
+    if x.ndim == 2:
+        x = x[np.newaxis, ...]  # [1,H,W]
+
+    return x
+
+
 @dataclass
 class ComparisonResult:
     """
@@ -166,20 +192,22 @@ def evaluate_refiner(
     """
     if verbose:
         print(f"\n{'='*60}")
-        print("Evaluating Diffusion Refiner vs Baseline")
+        print("Evaluating Uncertainty Estimation")
         print(f"{'='*60}")
         print(f"Test samples: {len(test_signals)}")
         print(f"n_samples: {n_samples}, sampling_steps: {sampling_steps}")
 
-    inference = RefinementInference(
-        refiner_model=refiner_model,
+    from .inference import UncertaintyEstimator
+    inference = UncertaintyEstimator(
         baseline_model=baseline_model,
+        diffusion_model=refiner_model,
         forward_model=forward_model,
         device=device,
     )
 
     baseline_predictions = []
-    refinement_results = []
+    uncertainty_maps = []
+    results = []
 
     for i in range(len(test_signals)):
         signal = test_signals[i:i+1]
@@ -187,90 +215,104 @@ def evaluate_refiner(
         if verbose and (i + 1) % 50 == 0:
             print(f"  Processing sample {i+1}/{len(test_signals)}")
 
-        result = inference.refine(
+        result = inference.predict(
             signal=signal,
             n_samples=n_samples,
             sampling_steps=sampling_steps,
+            return_samples=True,
         )
 
-        baseline_predictions.append(result.f_base)
-        refinement_results.append(result)
+        baseline_predictions.append(result.baseline)
+        uncertainty_maps.append(result.uncertainty)
+        results.append(result)
 
     baseline_predictions = np.stack(baseline_predictions)
-    refinement_spectra = np.stack([r.spectrum for r in refinement_results])
-    refinement_uncertainties = np.stack([r.uncertainty for r in refinement_results])
+    uncertainty_maps = np.stack(uncertainty_maps)
+
+    # Normalize ground_truths to [N,H,W] (handle [N,1,H,W] or [1,H,W])
+    ground_truths_norm = _normalize_spectrum(ground_truths)
 
     if verbose:
         print("\nComputing metrics...")
 
+    # Baseline metrics (UNet primary output)
     baseline_metrics = compute_spectrum_metrics(baseline_predictions, ground_truths)
-    refinement_metrics = compute_spectrum_metrics(refinement_spectra, ground_truths)
 
-    improvement = compute_improvement(baseline_metrics, refinement_metrics)
-
+    # Uncertainty statistics
     uncertainty_stats = {
-        'mean': refinement_uncertainties.mean(),
-        'std': refinement_uncertainties.std(),
-        'min': refinement_uncertainties.min(),
-        'max': refinement_uncertainties.max(),
+        'mean': uncertainty_maps.mean(),
+        'std': uncertainty_maps.std(),
+        'min': uncertainty_maps.min(),
+        'max': uncertainty_maps.max(),
     }
+
+    # Uncertainty correlation with error (use normalized ground_truths)
+    errors = np.abs(baseline_predictions - ground_truths_norm)
+    correlation = np.corrcoef(
+        errors.reshape(len(errors), -1).mean(axis=0),
+        uncertainty_maps.reshape(len(uncertainty_maps), -1).mean(axis=0)
+    )[0, 1]
 
     result = ComparisonResult(
         baseline_metrics=baseline_metrics,
-        refinement_metrics=refinement_metrics,
-        improvement=improvement,
-        uncertainty_stats=uncertainty_stats,
+        refinement_metrics={},  # No longer comparing refinement
+        improvement={},  # No longer comparing refinement
+        uncertainty_stats={**uncertainty_stats, 'error_correlation': correlation},
         predictions={
             'baseline': baseline_predictions,
-            'refined': refinement_spectra,
-            'uncertainty': refinement_uncertainties,
-            'ground_truth': ground_truths,
+            'uncertainty': uncertainty_maps,
+            'ground_truth': ground_truths_norm,
         }
     )
 
     if verbose:
-        print_summary(result)
+        print_summary_new(result)
 
     if output_dir:
-        save_results(result, output_dir)
+        save_results_new(result, output_dir)
 
     return result
 
 
 def print_summary(result: ComparisonResult):
-    """Print a summary of the comparison results."""
+    """Print a summary of the comparison results (legacy format)."""
+    print_summary_new(result)
+
+
+def print_summary_new(result: ComparisonResult):
+    """Print a summary of uncertainty estimation results."""
     bm = result.baseline_metrics
-    rm = result.refinement_metrics
-    imp = result.improvement
 
     print(f"\n{'='*60}")
-    print("RESULTS SUMMARY")
+    print("RESULTS SUMMARY - Uncertainty Estimation")
     print(f"{'='*60}")
 
-    print("\nBaseline (UNet only):")
+    print("\nBaseline (UNet - Primary Output):")
     print(f"  MSE:     {bm['mse'].mean():.6f} +/- {bm['mse'].std():.6f}")
     print(f"  MAE:     {bm['mae'].mean():.6f} +/- {bm['mae'].std():.6f}")
     print(f"  DEI Err: {bm['dei_error'].mean():.6f} +/- {bm['dei_error'].std():.6f}")
     print(f"  DEI p95: {np.percentile(bm['dei_error'], 95):.6f}")
 
-    print("\nRefined (Diffusion Refiner):")
-    print(f"  MSE:     {rm['mse'].mean():.6f} +/- {rm['mse'].std():.6f}")
-    print(f"  MAE:     {rm['mae'].mean():.6f} +/- {rm['mae'].std():.6f}")
-    print(f"  DEI Err: {rm['dei_error'].mean():.6f} +/- {rm['dei_error'].std():.6f}")
-    print(f"  DEI p95: {np.percentile(rm['dei_error'], 95):.6f}")
-
-    print("\nImprovement:")
-    print(f"  MSE mean:  {imp.get('mse_improvement_mean', 0):+.2f}%")
-    print(f"  DEI p95:   {imp.get('dei_error_improvement_p95', 0):+.2f}%")
-    print(f"  DEI mean:  {imp.get('dei_error_improvement_mean', 0):+.2f}%")
-
-    print("\nUncertainty Statistics:")
+    print("\nUncertainty Statistics (from Diffusion Sampling):")
     print(f"  Mean: {result.uncertainty_stats['mean']:.6f}")
     print(f"  Std:  {result.uncertainty_stats['std']:.6f}")
     print(f"  Max:  {result.uncertainty_stats['max']:.6f}")
 
+    if 'error_correlation' in result.uncertainty_stats:
+        print(f"\nUncertainty Calibration:")
+        print(f"  Error-Uncertainty Correlation: {result.uncertainty_stats['error_correlation']:.4f}")
+        if result.uncertainty_stats['error_correlation'] > 0.3:
+            print("  [Good] Positive correlation suggests uncertainty is informative")
+        else:
+            print("  [Warning] Low correlation - uncertainty may not reflect true error")
+
 
 def save_results(result: ComparisonResult, output_dir: str):
+    """Save comparison results to files (legacy format)."""
+    save_results_new(result, output_dir)
+
+
+def save_results_new(result: ComparisonResult, output_dir: str):
     """Save comparison results to files."""
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -278,10 +320,9 @@ def save_results(result: ComparisonResult, output_dir: str):
     predictions = result.predictions
     np.savez(
         output_dir / "predictions.npz",
-        baseline=predictions['baseline'],
-        refined=predictions['refined'],
-        uncertainty=predictions['uncertainty'],
-        ground_truth=predictions['ground_truth'],
+        baseline=predictions.get('baseline'),
+        uncertainty=predictions.get('uncertainty'),
+        ground_truth=predictions.get('ground_truth'),
     )
 
     import pandas as pd
@@ -293,28 +334,13 @@ def save_results(result: ComparisonResult, output_dir: str):
     })
     baseline_df.to_csv(output_dir / "baseline_metrics.csv", index=False)
 
-    refined_df = pd.DataFrame({
-        'mse': result.refinement_metrics['mse'],
-        'mae': result.refinement_metrics['mae'],
-        'dei_error': result.refinement_metrics['dei_error'],
-    })
-    refined_df.to_csv(output_dir / "refined_metrics.csv", index=False)
-
     summary = {
-        'metric': ['MSE_mean', 'MSE_std', 'DEI_error_mean', 'DEI_error_p95', 'improvement_p95'],
+        'metric': ['MSE_mean', 'MSE_std', 'DEI_error_mean', 'DEI_error_p95'],
         'baseline': [
             result.baseline_metrics['mse'].mean(),
             result.baseline_metrics['mse'].std(),
             result.baseline_metrics['dei_error'].mean(),
             np.percentile(result.baseline_metrics['dei_error'], 95),
-            0.0,
-        ],
-        'refined': [
-            result.refinement_metrics['mse'].mean(),
-            result.refinement_metrics['mse'].std(),
-            result.refinement_metrics['dei_error'].mean(),
-            np.percentile(result.refinement_metrics['dei_error'], 95),
-            result.improvement.get('dei_error_improvement_p95', 0),
         ],
     }
     summary_df = pd.DataFrame(summary)
@@ -329,7 +355,9 @@ def plot_comparison_samples(
     output_dir: Optional[str] = None,
 ):
     """
-    Plot comparison samples.
+    Plot comparison of baseline prediction with uncertainty.
+
+    Shows: Ground Truth, Baseline, Error, Uncertainty, High-Risk Regions
 
     Args:
         result: ComparisonResult from evaluate_refiner
@@ -337,10 +365,9 @@ def plot_comparison_samples(
         output_dir: Directory to save plots
     """
     predictions = result.predictions
-    baseline = predictions['baseline']
-    refined = predictions['refined']
-    uncertainty = predictions['uncertainty']
-    ground_truth = predictions['ground_truth']
+    baseline = predictions['baseline']  # Shape: [N, H, W]
+    uncertainty = predictions['uncertainty']  # Shape: [N, H, W]
+    ground_truth = predictions['ground_truth']  # Shape: [N, H, W]
 
     n_show = min(n_samples, len(baseline))
 
@@ -352,24 +379,32 @@ def plot_comparison_samples(
     for i in range(n_show):
         vmax = float(ground_truth[i].max())
 
-        axes[i, 0].imshow(ground_truth[i, 0], cmap='magma', origin='lower', vmin=0, vmax=vmax)
-        axes[i, 0].set_title(f'Ground Truth\nDEI={compute_dei(ground_truth[i, 0]):.3f}')
+        # Ground Truth
+        axes[i, 0].imshow(ground_truth[i], cmap='magma', origin='lower', vmin=0, vmax=vmax)
+        axes[i, 0].set_title(f'Ground Truth\nDEI={compute_dei(ground_truth[i]):.3f}')
         axes[i, 0].axis('off')
 
-        axes[i, 1].imshow(baseline[i, 0], cmap='magma', origin='lower', vmin=0, vmax=vmax)
-        axes[i, 1].set_title(f'Baseline\nDEI={compute_dei(baseline[i, 0]):.3f}')
+        # Baseline prediction
+        axes[i, 1].imshow(baseline[i], cmap='magma', origin='lower', vmin=0, vmax=vmax)
+        axes[i, 1].set_title(f'Baseline\nDEI={compute_dei(baseline[i]):.3f}')
         axes[i, 1].axis('off')
 
-        axes[i, 2].imshow(refined[i, 0], cmap='magma', origin='lower', vmin=0, vmax=vmax)
-        axes[i, 2].set_title(f'Refined\nDEI={compute_dei(refined[i, 0]):.3f}')
+        # Error map
+        error_map = np.abs(baseline[i] - ground_truth[i])
+        axes[i, 2].imshow(error_map, cmap='hot', origin='lower')
+        axes[i, 2].set_title(f'Error Map\nMAE={error_map.mean():.4f}')
         axes[i, 2].axis('off')
 
-        axes[i, 3].imshow(np.abs(refined[i, 0] - baseline[i, 0]), cmap='hot', origin='lower')
-        axes[i, 3].set_title('Refinement Delta')
+        # Uncertainty map
+        axes[i, 3].imshow(uncertainty[i], cmap='hot', origin='lower')
+        axes[i, 3].set_title(f'Uncertainty\nMean={uncertainty[i].mean():.4f}')
         axes[i, 3].axis('off')
 
-        axes[i, 4].imshow(uncertainty[i, 0], cmap='hot', origin='lower')
-        axes[i, 4].set_title('Uncertainty')
+        # High-risk regions (top 10% uncertainty)
+        threshold_value = np.percentile(uncertainty[i], 90)
+        high_risk = (uncertainty[i] > threshold_value).astype(np.float32)
+        axes[i, 4].imshow(high_risk, cmap='Reds', origin='lower', vmin=0, vmax=1)
+        axes[i, 4].set_title(f'High-Risk ({high_risk.mean()*100:.1f}%)')
         axes[i, 4].axis('off')
 
     plt.tight_layout()
@@ -388,37 +423,29 @@ def plot_error_distribution(
     output_dir: Optional[str] = None,
 ):
     """
-    Plot error distributions for baseline vs refined.
+    Plot error distributions for baseline predictions.
 
     Args:
         result: ComparisonResult from evaluate_refiner
         output_dir: Directory to save plots
     """
-    fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 4))
 
     bm = result.baseline_metrics
-    rm = result.refinement_metrics
 
-    axes[0].hist(bm['mse'], bins=50, alpha=0.5, label='Baseline', color='blue')
-    axes[0].hist(rm['mse'], bins=50, alpha=0.5, label='Refined', color='orange')
+    # MSE distribution
+    axes[0].hist(bm['mse'], bins=50, alpha=0.7, label='Baseline MSE', color='blue')
     axes[0].set_xlabel('MSE')
     axes[0].set_ylabel('Count')
     axes[0].set_title('MSE Distribution')
     axes[0].legend()
 
-    axes[1].hist(bm['dei_error'], bins=50, alpha=0.5, label='Baseline', color='blue')
-    axes[1].hist(rm['dei_error'], bins=50, alpha=0.5, label='Refined', color='orange')
+    # DEI Error distribution
+    axes[1].hist(bm['dei_error'], bins=50, alpha=0.7, label='Baseline DEI Error', color='blue')
     axes[1].set_xlabel('DEI Error')
     axes[1].set_ylabel('Count')
     axes[1].set_title('DEI Error Distribution')
     axes[1].legend()
-
-    axes[2].scatter(bm['dei_error'], rm['dei_error'], alpha=0.3, s=10)
-    axes[2].plot([0, bm['dei_error'].max()], [0, bm['dei_error'].max()], 'r--', label='y=x')
-    axes[2].set_xlabel('Baseline DEI Error')
-    axes[2].set_ylabel('Refined DEI Error')
-    axes[2].set_title('DEI Error Correlation')
-    axes[2].legend()
 
     plt.tight_layout()
 
@@ -445,13 +472,15 @@ def plot_uncertainty_calibration(
         output_dir: Directory to save plots
     """
     predictions = result.predictions
-    uncertainty = predictions['uncertainty']
-    refined = predictions['refined']
-    ground_truth = predictions['ground_truth']
+    uncertainty = predictions['uncertainty']  # Shape: [N, H, W]
+    baseline = predictions['baseline']  # Shape: [N, H, W]
+    ground_truth = predictions['ground_truth']  # Shape: [N, H, W]
 
-    pixel_errors = np.abs(refined - ground_truth).reshape(len(refined), -1)
+    # Error between baseline prediction and ground truth
+    pixel_errors = np.abs(baseline - ground_truth).reshape(len(baseline), -1)
     pixel_uncertainty = uncertainty.reshape(len(uncertainty), -1)
 
+    # Bin pixels by uncertainty and compute mean error per bin
     sorted_indices = np.argsort(pixel_uncertainty.mean(axis=0))
     n_bins = 10
     bin_size = len(sorted_indices) // n_bins

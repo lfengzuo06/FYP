@@ -209,6 +209,11 @@ class DDIMScheduler(DDPMScheduler):
         """
         Perform one DDIM denoising step.
 
+        Standard DDIM update formula:
+        x_{t-1} = sqrt(alpha_bar_{t-1}) * pred_x0 + sqrt(1 - alpha_bar_{t-1} - sigma^2) * direction + sigma * noise
+
+        Where direction = (x_t - sqrt(alpha_bar_t) * pred_x0) / sqrt(1 - alpha_bar_t)
+
         Args:
             model_output: Predicted noise epsilon_theta
             t: Current timestep
@@ -228,25 +233,35 @@ class DDIMScheduler(DDPMScheduler):
         t_long = torch.tensor([t] * batch_size, device=x_t.device)
         prev_t_long = torch.tensor([prev_t] * batch_size, device=x_t.device)
 
+        # Extract alpha values
         alpha_bar_t = self._extract(self.alphas_bar, t_long, x_t.shape)
         alpha_bar_prev_t = self._extract(self.alphas_bar, prev_t_long, x_t.shape)
 
-        beta_bar_t = 1.0 - alpha_bar_t
-        beta_bar_prev_t = 1.0 - alpha_bar_prev_t
-
+        # Predict x_0 from noise
         pred_x0 = self._pred_x0_from_eps(x_t, t_long, model_output)
 
         if clip_denoised:
             pred_x0 = torch.clamp(pred_x0, -1.0, 1.0)
 
+        # Compute direction vector: points from x_t toward pred_x0
+        # x_t = sqrt(alpha_bar_t) * pred_x0 + sqrt(1 - alpha_bar_t) * direction
+        # => direction = (x_t - sqrt(alpha_bar_t) * pred_x0) / sqrt(1 - alpha_bar_t)
+        sqrt_alpha_bar_t = torch.sqrt(alpha_bar_t)
+        sqrt_one_minus_alpha_bar_t = torch.sqrt(1.0 - alpha_bar_t)
+        direction = (x_t - sqrt_alpha_bar_t * pred_x0) / (sqrt_one_minus_alpha_bar_t + 1e-8)
+
+        # Compute sigma (noise scale)
         sigma_t = eta * torch.sqrt(
-            (1.0 - alpha_bar_prev_t) / (1.0 - alpha_bar_t) * (1.0 - alpha_bar_t / alpha_bar_prev_t)
+            (1.0 - alpha_bar_prev_t) / (1.0 - alpha_bar_t) * (1.0 - alpha_bar_t / (alpha_bar_prev_t + 1e-8))
         )
 
-        pred_dir_xt_to_x0 = torch.sqrt(1.0 - alpha_bar_prev_t - sigma_t ** 2) * (pred_x0 - x_t) / torch.sqrt(beta_bar_t)
+        # DDIM update
+        sqrt_alpha_bar_prev_t = torch.sqrt(alpha_bar_prev_t)
+        sqrt_one_minus_alpha_bar_prev_t_minus_sigma = torch.sqrt(1.0 - alpha_bar_prev_t - sigma_t ** 2)
 
-        x_prev = torch.sqrt(alpha_bar_prev_t) * pred_x0 + torch.sqrt(beta_bar_prev_t - sigma_t ** 2) * pred_dir_xt_to_x0
+        x_prev = sqrt_alpha_bar_prev_t * pred_x0 + sqrt_one_minus_alpha_bar_prev_t_minus_sigma * direction
 
+        # Add noise for stochastic sampling (eta > 0)
         if eta > 0:
             noise = torch.randn_like(x_t)
             x_prev = x_prev + sigma_t * noise
