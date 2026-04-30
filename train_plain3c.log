@@ -1,0 +1,35 @@
+<frozen runpy>:128: RuntimeWarning: 'models_3d.plain_unet.train' found in sys.modules after import of package 'models_3d.plain_unet', but prior to execution of 'models_3d.plain_unet.train'; this may result in unpredictable behaviour
+Using device: cuda
+Generating 3C datasets (n_compartments=3)...
+  train: 9500 samples, noisy signal range [0.0001, 1.0590], label range [0.0000, 0.5546]
+  val: 400 samples, noisy signal range [0.0006, 1.0424], label range [0.0000, 0.4510]
+  test: 100 samples, noisy signal range [0.0001, 1.0345], label range [0.0000, 0.5199]
+Model: PlainUNet3C (CNN Baseline for 3C)
+  Input channels: 3
+  Base filters: 32
+  Parameters: 3,352,257
+
+Training Plain U-Net on 3C data (CNN Baseline)...
+  Training samples: 9500
+  Validation samples: 400
+  Epochs: 60, Batch size: 8
+============================================================
+Epoch   1/60 | Train: 0.000100 | Val: 0.000096 | LR: 1.00e-03 | Time: 8.2s
+Epoch   2/60 | Train: 0.000090 | Val: 0.000086 | LR: 1.00e-03 | Time: 6.0s
+Epoch   3/60 | Train: 0.000081 | Val: 0.000084 | LR: 1.00e-03 | Time: 5.6s
+Epoch   4/60 | Train: 0.000067 | Val: 0.000061 | LR: 1.00e-03 | Time: 5.6s
+Epoch   5/60 | Train: 0.000055 | Val: 0.000051 | LR: 1.00e-03 | Time: 5.5s
+Epoch   6/60 | Train: 0.000048 | Val: 0.000045 | LR: 1.00e-03 | Time: 5.8s
+Epoch   7/60 | Train: 0.000044 | Val: 0.000042 | LR: 1.00e-03 | Time: 5.7s
+Epoch   8/60 | Train: 0.000042 | Val: 0.000046 | LR: 1.00e-03 | Time: 5.8s
+Epoch   9/60 | Train: 0.000040 | Val: 0.000040 | LR: 1.00e-03 | Time: 5.6s
+Epoch  10/60 | Train: 0.000038 | Val: 0.000034 | LR: 1.00e-03 | Time: 5.9s
+Epoch  11/60 | Train: 0.000037 | Val: 0.000038 | LR: 1.00e-03 | Time: 5.6s
+Epoch  12/60 | Train: 0.000037 | Val: 0.000038 | LR: 1.00e-03 | Time: 5.5s
+Epoch  13/60 | Train: 0.000036 | Val: 0.000034 | LR: 1.00e-03 | Time: 5.7s
+
+Early stopping at epoch 13
+
+Training completed in 76.57 seconds
+Best validation loss: 0.000096 at epoch 1
+Saved checkpoints to training_output_3d/plain_unet_3c/checkpoints_20260430_203333

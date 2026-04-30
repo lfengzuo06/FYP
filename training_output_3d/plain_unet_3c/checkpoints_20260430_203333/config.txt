@@ -1,0 +1,12 @@
+n_compartments: 3
+n_train: 9500
+n_val: 400
+n_test: 100
+epochs: 60
+batch_size: 8
+base_filters: 32
+learning_rate: 0.001
+noise_sigma_range: (0.005, 0.015)
+best_val_loss: 0.000096
+best_epoch: 1
+train_time: 76.57s
