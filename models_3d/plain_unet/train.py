@@ -1,13 +1,13 @@
 """
-Training script for Attention U-Net on 3-Compartment DEXSY.
+Training script for Plain U-Net on 3-Compartment DEXSY.
 
 Usage:
-    python -m models_3d.attention_unet.train
+    python -m models_3d.plain_unet.train
 
 Or import and use programmatically:
-    from models_3d.attention_unet import train_model
+    from models_3d.plain_unet import train_model
 
-    model, history = train_model(
+    model, history, datasets, fm = train_model(
         n_train=9500,
         n_val=400,
         epochs=60,
@@ -38,7 +38,7 @@ if str(_root) not in sys.path:
 from dexsy_core.forward_model import ForwardModel2D
 from dexsy_core.preprocessing import build_model_inputs
 
-from .model import AttentionUNet3C, PhysicsInformedLoss3C
+from .model import PlainUNet3C, PlainUNetLoss3C
 
 
 class DEXSYDataset3C(Dataset):
@@ -64,6 +64,7 @@ class DEXSYDataset3C(Dataset):
         y = self.labels[idx]
         clean = self.clean_signals[idx]
 
+        # Symmetry-preserving augmentation for DEXSY
         if self.augment and random.random() < 0.5:
             x = x.transpose(-1, -2)
             y = y.transpose(-1, -2)
@@ -136,7 +137,7 @@ def train_model(
     epochs: int = 60,
     batch_size: int = 8,
     base_filters: int = 32,
-    learning_rate: float = 5e-4,
+    learning_rate: float = 1e-3,
     weight_decay: float = 1e-4,
     early_stopping_patience: int = 12,
     early_stopping_min_delta: float = 1e-4,
@@ -149,7 +150,7 @@ def train_model(
     checkpoint_path: str = None,
 ) -> tuple:
     """
-    Train the Attention U-Net model on 3C data.
+    Train the Plain U-Net model on 3C data.
 
     Args:
         output_dir: Directory for saving outputs
@@ -175,7 +176,7 @@ def train_model(
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "training_output_3d" / "attention_unet_3c"
+        output_dir = Path(__file__).parent.parent.parent / "training_output_3d" / "plain_unet_3c"
     else:
         output_dir = Path(output_dir)
 
@@ -207,12 +208,12 @@ def train_model(
     )
 
     # Create model
-    model = AttentionUNet3C(
+    model = PlainUNet3C(
         in_channels=datasets['train']['inputs'].shape[1],
         base_filters=base_filters
     ).to(device)
 
-    print(f"Model: AttentionUNet3C")
+    print(f"Model: PlainUNet3C (CNN Baseline for 3C)")
     print(f"  Input channels: {datasets['train']['inputs'].shape[1]}")
     print(f"  Base filters: {base_filters}")
     n_params = sum(p.numel() for p in model.parameters())
@@ -226,14 +227,9 @@ def train_model(
         model.load_state_dict(state_dict)
 
     # Loss and optimizer
-    criterion = PhysicsInformedLoss3C(
-        forward_model=forward_model,
-        alpha_kl=1.0,
-        alpha_rec=0.2,
-        alpha_signal=0.1,
-        alpha_sum=0.05,
-        peak_weight=6.0,
-        alpha_smooth=2e-2,
+    criterion = PlainUNetLoss3C(
+        alpha_smooth=0.01,
+        peak_weight=4.0,
     ).to(device)
 
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
@@ -285,7 +281,7 @@ def train_model(
     best_model_state = None
     history = {'train_loss': [], 'val_loss': [], 'lr': [], 'best_epoch': None}
 
-    print(f"\nTraining Attention U-Net on 3C data...")
+    print(f"\nTraining Plain U-Net on 3C data (CNN Baseline)...")
     print(f"  Training samples: {len(train_loader.dataset)}")
     print(f"  Validation samples: {len(val_loader.dataset)}")
     print(f"  Epochs: {epochs}, Batch size: {batch_size}")
@@ -308,7 +304,7 @@ def train_model(
 
             optimizer.zero_grad()
             outputs = model(inputs)
-            loss = criterion(outputs, labels, clean_signals)
+            loss = criterion(outputs, labels)
             loss.backward()
             nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
             optimizer.step()
@@ -330,7 +326,7 @@ def train_model(
                 clean_signals = clean_signals.to(device)
 
                 outputs = model(inputs)
-                loss = criterion(outputs, labels, clean_signals)
+                loss = criterion(outputs, labels)
 
                 total_val_loss += loss.item()
                 n_val_batches += 1
@@ -428,14 +424,14 @@ def main():
     """Main training script."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Train Attention U-Net on 3C DEXSY")
+    parser = argparse.ArgumentParser(description="Train Plain U-Net on 3C DEXSY")
     parser.add_argument('--output_dir', type=str, default=None, help='Output directory')
     parser.add_argument('--n_train', type=int, default=9500, help='Number of training samples')
     parser.add_argument('--n_val', type=int, default=400, help='Number of validation samples')
     parser.add_argument('--epochs', type=int, default=60, help='Number of epochs')
     parser.add_argument('--batch_size', type=int, default=8, help='Batch size')
     parser.add_argument('--base_filters', type=int, default=32, help='Base filters')
-    parser.add_argument('--lr', type=float, default=5e-4, help='Learning rate')
+    parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--compartments', type=int, default=3, help='Number of compartments')
     parser.add_argument('--n_test', type=int, default=100, help='Number of test samples')

@@ -5,16 +5,29 @@ This module provides the Attention U-Net architecture adapted for 3C data,
 with physics-informed training support.
 """
 
-from .attention_unet.model import AttentionUNet3C, PhysicsInformedLoss3C, get_model
-from .attention_unet.train import train_model
-from .attention_unet.inference import InferencePipeline3C, predict, predict_batch
+from .attention_unet.model import AttentionUNet3C, PhysicsInformedLoss3C, get_model as get_attention_unet
+from .attention_unet.train import train_model as train_attention_unet
+from .attention_unet.inference import InferencePipeline3C, predict as predict_attention, predict_batch as predict_batch_attention
+
+from .plain_unet.model import PlainUNet3C, PlainUNetLoss3C, get_model as get_plain_unet
+from .plain_unet.train import train_model as train_plain_unet
+from .plain_unet.inference import InferencePipelinePlain3C, predict as predict_plain, predict_batch as predict_batch_plain
 
 __all__ = [
+    # Attention U-Net
     "AttentionUNet3C",
     "PhysicsInformedLoss3C",
-    "get_model",
-    "train_model",
+    "get_attention_unet",
+    "train_attention_unet",
     "InferencePipeline3C",
-    "predict",
-    "predict_batch",
+    "predict_attention",
+    "predict_batch_attention",
+    # Plain U-Net
+    "PlainUNet3C",
+    "PlainUNetLoss3C",
+    "get_plain_unet",
+    "train_plain_unet",
+    "InferencePipelinePlain3C",
+    "predict_plain",
+    "predict_batch_plain",
 ]
