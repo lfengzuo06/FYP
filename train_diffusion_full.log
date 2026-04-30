@@ -1,0 +1,65 @@
+<frozen runpy>:128: RuntimeWarning: 'models_3d.diffusion_refiner.train' found in sys.modules after import of package 'models_3d.diffusion_refiner', but prior to execution of 'models_3d.diffusion_refiner.train'; this may result in unpredictable behaviour
+Using device: cuda
+
+============================================================
+Initializing Diffusion Refiner Training
+============================================================
+
+Generating refinement datasets...
+
+Generating train set (9500 samples)...
+  Generating baselines with UNet...
+  Baseline generation: 0/9500
+  Baseline generation: 3200/9500
+  Baseline generation: 6400/9500
+  train: 9500 samples
+
+Generating val set (400 samples)...
+  Generating baselines with UNet...
+  Baseline generation: 0/400
+  val: 400 samples
+
+Generating test set (100 samples)...
+  Generating baselines with UNet...
+  Baseline generation: 0/100
+  test: 100 samples
+
+Training samples: 9500
+Validation samples: 400
+
+Refiner Model: ConditionalUNetDenoiser
+  Base filters: 32
+  Time embedding dim: 128
+  Conditioning channels: 5
+  Parameters: 7,933,796
+
+Training Configuration:
+  Epochs: 80
+  Batch size: 8
+  Learning rate: 0.0001
+  Weight physics: 0.05
+  Weight residual: 0.1
+  Gradient clip: 1.0
+  Diffusion timesteps: 1000
+============================================================
+Epoch   1/80 | Train: 0.2864 (n:0.0235, p:0.0560, r:0.0000) | Val: 0.2626 | DEI p95: 5.0600 | LR: 1.00e-04 | Time: 63.5s
+Epoch   5/80 | Train: 0.2632 (n:0.0011, p:0.0563, r:0.0000) | Val: 0.2647 | DEI p95: 5.0737 | LR: 1.00e-04 | Time: 63.8s
+Epoch  10/80 | Train: 0.2623 (n:0.0007, p:0.0564, r:0.0000) | Val: 0.2626 | DEI p95: 4.9002 | LR: 1.00e-04 | Time: 63.7s
+Epoch  15/80 | Train: 0.2619 (n:0.0006, p:0.0564, r:0.0000) | Val: 0.2640 | DEI p95: 5.0397 | LR: 1.00e-04 | Time: 63.8s
+Epoch  20/80 | Train: 0.2616 (n:0.0005, p:0.0563, r:0.0000) | Val: 0.2617 | DEI p95: 5.0692 | LR: 1.00e-04 | Time: 63.8s
+Epoch  25/80 | Train: 0.2622 (n:0.0005, p:0.0563, r:0.0000) | Val: 0.2609 | DEI p95: 5.0500 | LR: 1.00e-04 | Time: 63.7s
+Epoch  30/80 | Train: 0.2632 (n:0.0005, p:0.0564, r:0.0000) | Val: 0.2658 | DEI p95: 5.0500 | LR: 1.00e-04 | Time: 63.5s
+Epoch  35/80 | Train: 0.2644 (n:0.0005, p:0.0564, r:0.0000) | Val: 0.2663 | DEI p95: 5.0421 | LR: 1.00e-04 | Time: 63.6s
+Epoch  40/80 | Train: 0.2664 (n:0.0004, p:0.0564, r:0.0000) | Val: 0.2678 | DEI p95: 5.0441 | LR: 1.00e-04 | Time: 63.7s
+Epoch  45/80 | Train: 0.2678 (n:0.0004, p:0.0564, r:0.0000) | Val: 0.2679 | DEI p95: 5.0504 | LR: 1.00e-04 | Time: 63.6s
+Epoch  50/80 | Train: 0.2685 (n:0.0002, p:0.0565, r:0.0000) | Val: 0.2704 | DEI p95: 5.0607 | LR: 1.00e-04 | Time: 63.5s
+Epoch  55/80 | Train: 0.2687 (n:0.0002, p:0.0564, r:0.0000) | Val: 0.2706 | DEI p95: 5.3360 | LR: 1.00e-04 | Time: 63.5s
+Epoch  60/80 | Train: 0.2686 (n:0.0002, p:0.0564, r:0.0000) | Val: 0.2693 | DEI p95: 5.1990 | LR: 1.00e-04 | Time: 63.5s
+Epoch  65/80 | Train: 0.2688 (n:0.0002, p:0.0564, r:0.0000) | Val: 0.2684 | DEI p95: 4.9738 | LR: 5.00e-05 | Time: 63.5s
+Epoch  70/80 | Train: 0.2699 (n:0.0002, p:0.0565, r:0.0000) | Val: 0.2711 | DEI p95: 5.0417 | LR: 5.00e-05 | Time: 63.6s
+Epoch  75/80 | Train: 0.2694 (n:0.0002, p:0.0564, r:0.0000) | Val: 0.2701 | DEI p95: 5.0857 | LR: 5.00e-05 | Time: 63.6s
+Epoch  80/80 | Train: 0.2695 (n:0.0002, p:0.0564, r:0.0000) | Val: 0.2698 | DEI p95: 5.2541 | LR: 5.00e-05 | Time: 63.7s
+
+Training completed in 5030.18 seconds (83.8 minutes)
+Best validation loss: 0.260908 at epoch 25
+Saved checkpoints to training_output_3d/diffusion_refiner/checkpoints_20260430_100621
