@@ -1,0 +1,91 @@
+<frozen runpy>:128: RuntimeWarning: 'models_3d.deep_unfolding.train' found in sys.modules after import of package 'models_3d.deep_unfolding', but prior to execution of 'models_3d.deep_unfolding.train'; this may result in unpredictable behaviour
+
+============================================================
+Deep Unfolding Training on 3C Data
+============================================================
+Device: cuda
+Epochs: 60, Batch size: 8
+ISTA layers: 12, Hidden dim: 256, Init: mlp
+Learning rate: 0.001, Weight decay: 0.0001
+Compartments: 3
+Loss weights: kl=1.0, recon=0.2, consistency=0.1, sum=0.05, smooth=0.02
+
+Generating 3C datasets (n_compartments=3)...
+  train: 9500 samples, noisy signal range [0.0001, 1.0590], label range [0.0000, 0.5546]
+  val: 400 samples, noisy signal range [0.0006, 1.0424], label range [0.0000, 0.4510]
+  test: 100 samples, noisy signal range [0.0001, 1.0345], label range [0.0000, 0.5199]
+Model: DeepUnfolding3C
+  Parameters: 2,198,832
+
+Starting training from epoch 0...
+Epoch   1/60 | Train: 2.4590 (cons=0.0292, recon=0.0001) | Val: 2.1211 (cons=0.0244, recon=0.0001) | LR: 1.00e-03 | 12.7s (improved)
+Epoch   2/60 | Train: 1.9619 (cons=0.0204, recon=0.0001) | Val: 1.8807 (cons=0.0196, recon=0.0001) | LR: 1.00e-03 | 10.8s (improved)
+Epoch   3/60 | Train: 1.8855 (cons=0.0203, recon=0.0001) | Val: 1.8036 (cons=0.0196, recon=0.0001) | LR: 1.00e-03 | 10.9s (improved)
+Epoch   4/60 | Train: 1.8306 (cons=0.0198, recon=0.0001) | Val: 1.7841 (cons=0.0197, recon=0.0001) | LR: 1.00e-03 | 10.9s (improved)
+Epoch   5/60 | Train: 1.7693 (cons=0.0193, recon=0.0001) | Val: 1.8279 (cons=0.0201, recon=0.0001) | LR: 1.00e-03 | 10.8s
+Epoch   6/60 | Train: 1.7276 (cons=0.0184, recon=0.0001) | Val: 1.6963 (cons=0.0188, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch   7/60 | Train: 1.6779 (cons=0.0167, recon=0.0001) | Val: 1.6836 (cons=0.0147, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch   8/60 | Train: 1.6551 (cons=0.0158, recon=0.0001) | Val: 1.6364 (cons=0.0151, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch   9/60 | Train: 1.6066 (cons=0.0147, recon=0.0001) | Val: 1.5942 (cons=0.0148, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch  10/60 | Train: 1.5719 (cons=0.0132, recon=0.0001) | Val: 1.5543 (cons=0.0116, recon=0.0001) | LR: 1.00e-03 | 11.0s (improved)
+Epoch  11/60 | Train: 1.5223 (cons=0.0123, recon=0.0001) | Val: 1.4625 (cons=0.0119, recon=0.0001) | LR: 1.00e-03 | 10.8s (improved)
+Epoch  12/60 | Train: 1.4384 (cons=0.0122, recon=0.0001) | Val: 1.4290 (cons=0.0108, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch  13/60 | Train: 1.3785 (cons=0.0114, recon=0.0001) | Val: 1.3634 (cons=0.0125, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch  14/60 | Train: 1.3511 (cons=0.0119, recon=0.0001) | Val: 1.3815 (cons=0.0115, recon=0.0001) | LR: 1.00e-03 | 10.7s
+Epoch  15/60 | Train: 1.2977 (cons=0.0108, recon=0.0001) | Val: 1.2983 (cons=0.0097, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch  16/60 | Train: 1.2802 (cons=0.0102, recon=0.0001) | Val: 1.2261 (cons=0.0101, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch  17/60 | Train: 1.2420 (cons=0.0099, recon=0.0001) | Val: 1.1538 (cons=0.0101, recon=0.0001) | LR: 1.00e-03 | 10.7s (improved)
+Epoch  18/60 | Train: 1.1914 (cons=0.0095, recon=0.0001) | Val: 1.1399 (cons=0.0090, recon=0.0001) | LR: 1.00e-03 | 10.8s (improved)
+Epoch  19/60 | Train: 1.1762 (cons=0.0099, recon=0.0001) | Val: 1.1580 (cons=0.0084, recon=0.0001) | LR: 1.00e-03 | 10.7s
+Epoch  20/60 | Train: 1.1707 (cons=0.0094, recon=0.0001) | Val: 1.1396 (cons=0.0096, recon=0.0001) | LR: 1.00e-03 | 10.7s (improved)
+Epoch  21/60 | Train: 1.1293 (cons=0.0091, recon=0.0001) | Val: 1.0916 (cons=0.0085, recon=0.0001) | LR: 1.00e-03 | 10.7s (improved)
+Epoch  22/60 | Train: 1.1201 (cons=0.0090, recon=0.0001) | Val: 1.1350 (cons=0.0089, recon=0.0001) | LR: 1.00e-03 | 10.6s
+Epoch  23/60 | Train: 1.1067 (cons=0.0089, recon=0.0001) | Val: 1.0787 (cons=0.0080, recon=0.0001) | LR: 1.00e-03 | 10.7s (improved)
+Epoch  24/60 | Train: 1.1009 (cons=0.0089, recon=0.0001) | Val: 1.0368 (cons=0.0084, recon=0.0001) | LR: 1.00e-03 | 10.7s (improved)
+Epoch  25/60 | Train: 1.0839 (cons=0.0089, recon=0.0001) | Val: 1.0656 (cons=0.0103, recon=0.0001) | LR: 1.00e-03 | 11.1s
+Epoch  26/60 | Train: 1.0725 (cons=0.0087, recon=0.0001) | Val: 1.0365 (cons=0.0087, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch  27/60 | Train: 1.0650 (cons=0.0089, recon=0.0001) | Val: 1.0058 (cons=0.0082, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch  28/60 | Train: 1.0507 (cons=0.0089, recon=0.0001) | Val: 1.0293 (cons=0.0105, recon=0.0001) | LR: 1.00e-03 | 10.6s
+Epoch  29/60 | Train: 1.0395 (cons=0.0088, recon=0.0001) | Val: 1.0542 (cons=0.0108, recon=0.0001) | LR: 1.00e-03 | 10.6s
+Epoch  30/60 | Train: 1.0301 (cons=0.0087, recon=0.0001) | Val: 0.9990 (cons=0.0081, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch  31/60 | Train: 1.0189 (cons=0.0084, recon=0.0001) | Val: 0.9642 (cons=0.0080, recon=0.0001) | LR: 1.00e-03 | 10.7s (improved)
+Epoch  32/60 | Train: 1.0170 (cons=0.0085, recon=0.0001) | Val: 1.0270 (cons=0.0101, recon=0.0001) | LR: 1.00e-03 | 10.6s
+Epoch  33/60 | Train: 1.0138 (cons=0.0087, recon=0.0001) | Val: 0.9420 (cons=0.0081, recon=0.0001) | LR: 1.00e-03 | 10.6s (improved)
+Epoch  34/60 | Train: 0.9982 (cons=0.0084, recon=0.0001) | Val: 0.9932 (cons=0.0093, recon=0.0001) | LR: 1.00e-03 | 10.6s
+Epoch  35/60 | Train: 1.0020 (cons=0.0085, recon=0.0001) | Val: 1.0274 (cons=0.0087, recon=0.0001) | LR: 1.00e-03 | 10.7s
+Epoch  36/60 | Train: 0.9950 (cons=0.0086, recon=0.0001) | Val: 0.9168 (cons=0.0081, recon=0.0001) | LR: 1.00e-03 | 10.7s (improved)
+Epoch  37/60 | Train: 0.9909 (cons=0.0085, recon=0.0001) | Val: 0.9594 (cons=0.0080, recon=0.0001) | LR: 1.00e-03 | 10.6s
+Epoch  38/60 | Train: 0.9882 (cons=0.0084, recon=0.0001) | Val: 0.9726 (cons=0.0073, recon=0.0001) | LR: 1.00e-03 | 10.6s
+Epoch  39/60 | Train: 0.9781 (cons=0.0082, recon=0.0001) | Val: 0.9249 (cons=0.0080, recon=0.0001) | LR: 1.00e-03 | 10.6s
+Epoch  40/60 | Train: 0.9734 (cons=0.0084, recon=0.0001) | Val: 0.9638 (cons=0.0085, recon=0.0001) | LR: 1.00e-03 | 10.6s
+Epoch  41/60 | Train: 0.9886 (cons=0.0085, recon=0.0001) | Val: 0.9450 (cons=0.0079, recon=0.0001) | LR: 1.00e-03 | 10.7s
+Epoch  42/60 | Train: 0.9634 (cons=0.0082, recon=0.0001) | Val: 0.9340 (cons=0.0077, recon=0.0001) | LR: 5.00e-04 | 10.6s
+Epoch  43/60 | Train: 0.8969 (cons=0.0075, recon=0.0001) | Val: 0.8678 (cons=0.0075, recon=0.0001) | LR: 5.00e-04 | 10.6s (improved)
+Epoch  44/60 | Train: 0.8793 (cons=0.0074, recon=0.0001) | Val: 0.8526 (cons=0.0075, recon=0.0001) | LR: 5.00e-04 | 10.7s (improved)
+Epoch  45/60 | Train: 0.8657 (cons=0.0074, recon=0.0001) | Val: 0.8734 (cons=0.0071, recon=0.0001) | LR: 5.00e-04 | 10.6s
+Epoch  46/60 | Train: 0.8542 (cons=0.0071, recon=0.0001) | Val: 0.8290 (cons=0.0069, recon=0.0001) | LR: 5.00e-04 | 10.6s (improved)
+Epoch  47/60 | Train: 0.8484 (cons=0.0074, recon=0.0001) | Val: 0.8481 (cons=0.0075, recon=0.0001) | LR: 5.00e-04 | 10.6s
+Epoch  48/60 | Train: 0.8475 (cons=0.0074, recon=0.0001) | Val: 0.8439 (cons=0.0071, recon=0.0001) | LR: 5.00e-04 | 10.6s
+Epoch  49/60 | Train: 0.8449 (cons=0.0075, recon=0.0001) | Val: 0.8132 (cons=0.0072, recon=0.0001) | LR: 5.00e-04 | 10.6s (improved)
+Epoch  50/60 | Train: 0.8389 (cons=0.0074, recon=0.0001) | Val: 0.8813 (cons=0.0079, recon=0.0001) | LR: 5.00e-04 | 10.6s
+Epoch  51/60 | Train: 0.8352 (cons=0.0073, recon=0.0001) | Val: 0.8170 (cons=0.0072, recon=0.0001) | LR: 5.00e-04 | 10.7s
+Epoch  52/60 | Train: 0.8284 (cons=0.0072, recon=0.0001) | Val: 0.8172 (cons=0.0075, recon=0.0001) | LR: 5.00e-04 | 10.7s
+Epoch  53/60 | Train: 0.8302 (cons=0.0073, recon=0.0001) | Val: 0.8618 (cons=0.0076, recon=0.0001) | LR: 5.00e-04 | 10.7s
+Epoch  54/60 | Train: 0.8360 (cons=0.0073, recon=0.0001) | Val: 0.8656 (cons=0.0072, recon=0.0001) | LR: 5.00e-04 | 10.6s
+Epoch  55/60 | Train: 0.8227 (cons=0.0073, recon=0.0001) | Val: 0.8490 (cons=0.0076, recon=0.0001) | LR: 2.50e-04 | 10.7s
+Epoch  56/60 | Train: 0.7865 (cons=0.0070, recon=0.0001) | Val: 0.7916 (cons=0.0072, recon=0.0001) | LR: 2.50e-04 | 10.7s (improved)
+Epoch  57/60 | Train: 0.7718 (cons=0.0070, recon=0.0001) | Val: 0.7592 (cons=0.0065, recon=0.0001) | LR: 2.50e-04 | 10.7s (improved)
+Epoch  58/60 | Train: 0.7667 (cons=0.0070, recon=0.0001) | Val: 0.7730 (cons=0.0069, recon=0.0001) | LR: 2.50e-04 | 10.7s
+Epoch  59/60 | Train: 0.7627 (cons=0.0068, recon=0.0001) | Val: 0.7721 (cons=0.0067, recon=0.0001) | LR: 2.50e-04 | 10.7s
+Epoch  60/60 | Train: 0.7620 (cons=0.0069, recon=0.0001) | Val: 0.7749 (cons=0.0070, recon=0.0001) | LR: 2.50e-04 | 10.7s
+
+Best model saved to training_output_3d/deep_unfolding_3c/checkpoints_20260501_121714/best_model.pt
+
+============================================================
+Test Results
+============================================================
+Test loss: 0.7585
+Test DEI: mean=0.1592, std=0.1419
+Test DEI range: [0.0128, 0.7721]
+
+Saved checkpoints to training_output_3d/deep_unfolding_3c/checkpoints_20260501_121714
