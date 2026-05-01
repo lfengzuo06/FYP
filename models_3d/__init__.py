@@ -13,6 +13,10 @@ from .plain_unet.model import PlainUNet3C, PlainUNetLoss3C, get_model as get_pla
 from .plain_unet.train import train_model as train_plain_unet
 from .plain_unet.inference import InferencePipelinePlain3C, predict as predict_plain, predict_batch as predict_batch_plain
 
+from .deep_unfolding.model import DeepUnfolding3C, get_model as get_deep_unfolding
+from .deep_unfolding.train import train_model as train_deep_unfolding
+from .deep_unfolding.inference import InferencePipeline3C as InferencePipelineDeep3C, predict as predict_deep, predict_batch as predict_batch_deep, load_trained_model as load_deep_unfolding
+
 __all__ = [
     # Attention U-Net
     "AttentionUNet3C",
@@ -30,4 +34,12 @@ __all__ = [
     "InferencePipelinePlain3C",
     "predict_plain",
     "predict_batch_plain",
+    # Deep Unfolding
+    "DeepUnfolding3C",
+    "get_deep_unfolding",
+    "train_deep_unfolding",
+    "InferencePipelineDeep3C",
+    "predict_deep",
+    "predict_batch_deep",
+    "load_deep_unfolding",
 ]
