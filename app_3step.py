@@ -31,6 +31,7 @@ from improved_2d_dexsy import (
     DEXSYInferencePipeline,
     ForwardModel2D,
     available_models,
+    create_output_archive,
     create_run_output_dir,
     is_3c_model,
     list_available_checkpoints,
@@ -212,9 +213,9 @@ def _generate_parametric(
     diffusion_1: float,
     diffusion_2: float,
     volume_fraction: float,
-    exchange_rate: float,
     mixing_time: float,
     noise_sigma: float,
+    exchange_rate: float | None = None,
     diffusion_3: float | None = None,
     volume_fraction_3: float | None = None,
     exchange_rate_01: float | None = None,
@@ -225,6 +226,8 @@ def _generate_parametric(
     fm = ForwardModel2D()
 
     if n_compartments == 2:
+        if exchange_rate is None:
+            raise ValueError("2-compartment generation requires exchange_rate.")
         diffusions = np.array([diffusion_1, diffusion_2], dtype=np.float64)
         volume_fractions = np.array([volume_fraction, 1 - volume_fraction], dtype=np.float64)
 
