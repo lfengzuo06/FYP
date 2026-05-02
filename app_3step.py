@@ -228,7 +228,7 @@ def _generate_parametric(
         volume_fractions = np.array([volume_fraction, 1 - volume_fraction], dtype=np.float64)
 
         # Use validation spectrum generator for exact parameters
-        spectrum, clean_signal, params = fm.generate_2c_validation_spectrum(
+        spectrum, _clean_signal, params = fm.generate_2c_validation_spectrum(
             diffusions=diffusions,
             volume_fractions=volume_fractions,
             exchange_rate=exchange_rate,
@@ -254,7 +254,7 @@ def _generate_parametric(
 
         return SignalInputResult(
             signal=signal.astype(np.float32),
-            ground_truth=clean_spectrum.astype(np.float32),
+            ground_truth=spectrum.astype(np.float32),
             params=params,
             input_method="params",
             n_compartments=2,
@@ -365,6 +365,9 @@ def _generate_parametric(
         input_method="params",
         n_compartments=n_compartments,
     )
+
+
+def _generate_random(n_compartments: int) -> SignalInputResult:
     """Generate random signal."""
     fm = ForwardModel2D()
 
