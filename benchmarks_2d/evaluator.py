@@ -623,23 +623,24 @@ def get_available_training_logs() -> dict[str, Path]:
     repo_root = Path(__file__).parent.parent
     log_files = {}
 
-    # Known log file locations
-    candidates = [
+    # Training logs are now in training_logs/ directory
+    training_logs_dir = repo_root / "training_logs"
+    if training_logs_dir.exists():
+        for log_file in training_logs_dir.glob("*.log"):
+            # Extract model name from filename: train_<model>.log -> model
+            name = log_file.stem.replace("train_", "").replace("_log", "")
+            log_files[name] = log_file
+
+    # Legacy locations (for backwards compatibility)
+    legacy_candidates = [
         ("attention_unet", repo_root / "improved_2d_dexsy" / "train_log.txt"),
         ("fno", repo_root / "train_fno.log"),
         ("deeponet", repo_root / "train_deeponet.log"),
         ("pinn", repo_root / "train_pinn.log"),
-        # Also check training_output directories
-        ("fno", repo_root / "training_output_2d" / "neural_operators_fno" / "training.log"),
-        ("deeponet", repo_root / "training_output_2d" / "neural_operators_deeponet" / "training.log"),
-        ("pinn", repo_root / "training_output_2d" / "pinn" / "training.log"),
     ]
 
-    for item in candidates:
-        model_name, path = item if isinstance(item, tuple) else (None, item)
-        if path.exists():
-            if model_name is None:
-                model_name = path.stem.replace("_log", "").replace("train_", "")
+    for model_name, path in legacy_candidates:
+        if path.exists() and model_name not in log_files:
             log_files[model_name] = path
 
     return log_files

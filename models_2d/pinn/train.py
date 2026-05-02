@@ -164,7 +164,7 @@ def train_model(
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "training_output_2d" / "pinn"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_2d" / "pinn"
     else:
         output_dir = Path(output_dir)
 
@@ -382,7 +382,7 @@ if __name__ == "__main__":
     import sys
 
     print("Training PINN model...")
-    print(f"Output directory: {Path(__file__).parent.parent.parent / 'training_output_2d'}")
+    print(f"Output directory: {Path(__file__).parent.parent.parent / 'checkpoints_2d'}")
 
     try:
         model, history, datasets, forward_model = train_model(

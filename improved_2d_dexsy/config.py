@@ -15,7 +15,7 @@ def resolve_repo_root() -> Path:
 
 
 REPO_ROOT = resolve_repo_root()
-CHECKPOINTS_DIR = REPO_ROOT / "checkpoints"
+CHECKPOINTS_DIR = REPO_ROOT / "checkpoints_2d"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "outputs" / "inference"
 DEFAULT_MODEL_NAME = "attention_unet"
 DEFAULT_CHECKPOINTS = {

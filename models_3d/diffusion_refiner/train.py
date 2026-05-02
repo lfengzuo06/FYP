@@ -233,7 +233,7 @@ def train_refiner(
         (model, history)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "training_output_3d" / "diffusion_refiner"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / "diffusion_refiner"
     else:
         output_dir = Path(output_dir)
 

@@ -99,8 +99,8 @@ class InferencePipeline:
         """Find the default checkpoint from bundled locations."""
         root = Path(__file__).parent.parent.parent
         preferred_paths = [
-            root / "checkpoints" / self.DEFAULT_CHECKPOINT,
-            root / "checkpoints" / "plain_unet" / "best_model.pt",
+            root / "checkpoints_2d" / self.DEFAULT_CHECKPOINT,
+            root / "checkpoints_2d" / "plain_unet" / "best_model.pt",
         ]
         for p in preferred_paths:
             if p.exists():

@@ -169,7 +169,7 @@ def train_model(
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "training_output_2d" / "attention_unet"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_2d" / "attention_unet"
     else:
         output_dir = Path(output_dir)
 

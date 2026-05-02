@@ -99,8 +99,8 @@ class InferencePipeline:
     def _find_default_checkpoint(self) -> Path | None:
         """Find the default checkpoint from bundled locations."""
         possible_paths = [
-            Path(__file__).parent.parent.parent / "checkpoints" / "attention_unet" / self.DEFAULT_CHECKPOINT,
-            Path(__file__).parent.parent.parent / "checkpoints" / "attention_unet" / "attention_unet_best_model.pt",
+            Path(__file__).parent.parent.parent / "checkpoints_2d" / "attention_unet" / self.DEFAULT_CHECKPOINT,
+            Path(__file__).parent.parent.parent / "checkpoints_2d" / "attention_unet" / "attention_unet_best_model.pt",
         ]
 
         for p in possible_paths:

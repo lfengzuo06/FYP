@@ -173,7 +173,7 @@ def train_model(
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "training_output_3d" / "pinn_3c"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / "pinn_3c"
     else:
         output_dir = Path(output_dir)
 

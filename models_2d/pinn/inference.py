@@ -147,11 +147,11 @@ class PINNInferencePipeline:
         """Find the default compatible checkpoint from bundled locations."""
         repo_root = Path(__file__).parent.parent.parent
         preferred_paths = [
-            repo_root / "checkpoints" / "pinn" / self.DEFAULT_CHECKPOINT,
-            repo_root / "checkpoints" / "pinn" / "pinn_best_model.pt",
+            repo_root / "checkpoints_2d" / "pinn" / self.DEFAULT_CHECKPOINT,
+            repo_root / "checkpoints_2d" / "pinn" / "pinn_best_model.pt",
         ]
         scan_dirs = [
-            repo_root / "checkpoints" / "pinn",
+            repo_root / "checkpoints_2d" / "pinn",
         ]
 
         candidate_paths: list[Path] = []
@@ -202,7 +202,7 @@ class PINNInferencePipeline:
             raise RuntimeError(
                 f"PINN checkpoint is incompatible with current PINN2D architecture: "
                 f"{self.checkpoint_path}\nReason: {reason}\n"
-                "Use a compatible checkpoint (e.g. checkpoints/pinn_v2/checkpoints/pinn_*.pt) "
+                "Use a compatible checkpoint (e.g. checkpoints_2d/pinn_v2/checkpoints/pinn_*.pt) "
                 "or retrain with the current code."
             )
 

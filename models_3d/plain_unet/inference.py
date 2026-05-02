@@ -91,15 +91,17 @@ class InferencePipelinePlain3C:
 
     def _find_default_checkpoint(self) -> Path | None:
         """Find the default checkpoint from bundled locations."""
-        possible_paths = [
-            Path(__file__).parent.parent.parent / "checkpoints" / "plain_unet_3c" / "best_model.pt",
-            Path(__file__).parent.parent.parent / "training_output_3d" / "plain_unet_3c" / "checkpoints_latest" / "best_model.pt",
-        ]
-
-        for p in possible_paths:
-            if p.exists():
-                return p
-
+        root = Path(__file__).parent.parent.parent / "checkpoints_3d" / "plain_unet_3c"
+        
+        if not root.exists():
+            return None
+        
+        # Find all best_model.pt files in timestamped subdirectories
+        best_models = list(root.glob("*/best_model.pt"))
+        if best_models:
+            # Return the most recent one
+            return sorted(best_models, key=lambda p: p.stat().st_mtime)[-1]
+        
         return None
 
     def _load_model(self) -> tuple:

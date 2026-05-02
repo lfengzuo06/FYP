@@ -50,8 +50,8 @@ class InferencePipeline:
     
     # Default checkpoint paths
     DEFAULT_PATHS = {
-        "deeponet": "checkpoints/deeponet/best_model.pt",
-        "fno": "checkpoints/fno/best_model.pt",
+        "deeponet": "checkpoints_2d/deeponet/best_model.pt",
+        "fno": "checkpoints_2d/fno/best_model.pt",
     }
 
     def __init__(
@@ -117,14 +117,12 @@ class InferencePipeline:
         # Search patterns for trained models
         search_patterns = {
             "deeponet": [
-                "checkpoints/deeponet/**/*.pt",
+                "checkpoints_2d/deeponet/**/*.pt",
                 "**/deeponet*best*.pt",
-                "training_output_2d/neural_operators_deeponet/**/*.pt",
             ],
             "fno": [
-                "checkpoints/fno/**/*.pt",
+                "checkpoints_2d/fno/**/*.pt",
                 "**/fno*best*.pt",
-                "training_output_2d/neural_operators_fno/**/*.pt",
             ],
         }
         

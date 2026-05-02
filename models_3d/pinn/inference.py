@@ -147,20 +147,23 @@ class PINNInferencePipeline3C:
 
     def _find_default_checkpoint(self) -> Path | None:
         """Find the default compatible checkpoint from bundled locations."""
-        repo_root = Path(__file__).parent.parent.parent
-        preferred_paths = [
-            repo_root / "checkpoints" / "pinn_3c" / "best_model.pt",
-            repo_root / "training_output_3d" / "pinn_3c" / "checkpoints_latest" / "best_model.pt",
-        ]
-
-        candidate_paths: list[Path] = []
-        for p in preferred_paths:
-            if p.exists():
-                compatible, reason = _checkpoint_compatibility_reason(p)
-                if compatible:
-                    return p
-                self._incompatible_checkpoints.append((p, reason))
-
+        root = Path(__file__).parent.parent.parent / "checkpoints_3d" / "pinn_3c"
+        
+        if not root.exists():
+            return None
+        
+        # Find all best_model.pt files in timestamped subdirectories
+        best_models = list(root.glob("*/best_model.pt"))
+        if not best_models:
+            return None
+        
+        # Check compatibility of each candidate
+        for candidate in sorted(best_models, key=lambda p: p.stat().st_mtime, reverse=True):
+            compatible, reason = _checkpoint_compatibility_reason(candidate)
+            if compatible:
+                return candidate
+            self._incompatible_checkpoints.append((candidate, reason))
+        
         return None
 
     def _load_model(self) -> tuple:
