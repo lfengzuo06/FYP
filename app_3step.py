@@ -142,7 +142,7 @@ def _plot_heatmap(data: np.ndarray, title: str, cmap: str = "plasma", figsize=(4
 
 
 def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=None) -> plt.Figure:
-    """Create a 4-panel comparison figure."""
+    """Create a 4-panel comparison figure with smooth interpolation and improved colors."""
     n_plots = 4 if ground_truth is not None else 3
 
     if n_plots == 4:
@@ -150,8 +150,8 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
     else:
         fig, axes = plt.subplots(1, 3, figsize=(10, 3.2))
 
-    # Signal
-    im0 = axes[0].imshow(signal, cmap="viridis", origin="lower")
+    # Signal - use cubehelix for a nice scientific look
+    im0 = axes[0].imshow(signal, cmap="cividis", origin="lower", interpolation="bilinear")
     axes[0].set_title("Input Signal", fontsize=10)
     axes[0].set_xlabel("b2 index")
     axes[0].set_ylabel("b1 index")
@@ -159,8 +159,10 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
 
     if ground_truth is not None:
         vmax = max(float(ground_truth.max()), float(prediction.max()), 1e-6)
-        # Ground Truth
-        im1 = axes[1].imshow(ground_truth, cmap="magma", origin="lower", vmin=0, vmax=vmax)
+        vmin = 0
+        # Ground Truth - use inferno for better contrast
+        im1 = axes[1].imshow(ground_truth, cmap="inferno", origin="lower",
+                             vmin=vmin, vmax=vmax, interpolation="bilinear")
         gt_title = "Ground Truth"
         if dei_gt is not None:
             gt_title += f"\nDEI={dei_gt:.4f}"
@@ -170,7 +172,8 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
         plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
         # Prediction
-        im2 = axes[2].imshow(prediction, cmap="magma", origin="lower", vmin=0, vmax=vmax)
+        im2 = axes[2].imshow(prediction, cmap="inferno", origin="lower",
+                             vmin=vmin, vmax=vmax, interpolation="bilinear")
         pred_title = "Model Output"
         if dei_pred is not None:
             pred_title += f"\nDEI={dei_pred:.4f}"
@@ -179,16 +182,19 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
         axes[2].set_ylabel("D1 index")
         plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
 
-        # Difference
+        # Difference - use coolwarm for intuitive +/- coloring
         diff = prediction - ground_truth
-        im3 = axes[3].imshow(diff, cmap="RdBu_r", origin="lower", vmin=-vmax/4, vmax=vmax/4)
+        vrange = max(abs(diff.min()), abs(diff.max()), vmax/8)
+        im3 = axes[3].imshow(diff, cmap="coolwarm", origin="lower",
+                             vmin=-vrange, vmax=vrange, interpolation="bilinear")
         axes[3].set_title("Difference\n(Pred - GT)", fontsize=10)
         axes[3].set_xlabel("D2 index")
         axes[3].set_ylabel("D1 index")
         plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
     else:
         # No ground truth - just signal and prediction
-        im1 = axes[1].imshow(prediction, cmap="magma", origin="lower")
+        im1 = axes[1].imshow(prediction, cmap="inferno", origin="lower",
+                             interpolation="bilinear")
         pred_title = "Model Output"
         if dei_pred is not None:
             pred_title += f"\nDEI={dei_pred:.4f}"
@@ -198,7 +204,8 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
         plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
         # Log signal
-        im2 = axes[2].imshow(np.log(signal + 1e-6), cmap="viridis", origin="lower")
+        im2 = axes[2].imshow(np.log(signal + 1e-6), cmap="cividis",
+                             origin="lower", interpolation="bilinear")
         axes[2].set_title("Log(Signal)", fontsize=10)
         axes[2].set_xlabel("b2 index")
         axes[2].set_ylabel("b1 index")
@@ -390,15 +397,15 @@ def _generate_random(n_compartments: int) -> SignalInputResult:
 
 
 def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
-    """Generate preview plot and parameter summary."""
+    """Generate preview plot and parameter summary with smooth interpolation."""
     signal = result.signal
     ground_truth = result.ground_truth
     params = result.params
 
     fig, axes = plt.subplots(1, 3, figsize=(13, 3.5))
 
-    # Signal
-    im0 = axes[0].imshow(signal, cmap="viridis", origin="lower")
+    # Signal - use cividis for better contrast
+    im0 = axes[0].imshow(signal, cmap="cividis", origin="lower", interpolation="bilinear")
     axes[0].set_title("Input Signal", fontsize=11)
     axes[0].set_xlabel("b2 index")
     axes[0].set_ylabel("b1 index")
@@ -406,7 +413,7 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
 
     # Log Signal
     log_signal = np.log(signal + 1e-6)
-    im1 = axes[1].imshow(log_signal, cmap="viridis", origin="lower")
+    im1 = axes[1].imshow(log_signal, cmap="cividis", origin="lower", interpolation="bilinear")
     axes[1].set_title("Log(Signal)", fontsize=11)
     axes[1].set_xlabel("b2 index")
     axes[1].set_ylabel("b1 index")
@@ -414,7 +421,7 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
 
     # Ground Truth
     if ground_truth is not None:
-        im2 = axes[2].imshow(ground_truth, cmap="magma", origin="lower")
+        im2 = axes[2].imshow(ground_truth, cmap="inferno", origin="lower", interpolation="bilinear")
         gt_title = "Ground Truth Spectrum"
         if "mixing_time" in params:
             gt_title += f"\nTm={params['mixing_time']:.3f}s"
