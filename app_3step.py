@@ -31,6 +31,7 @@ from improved_2d_dexsy import (
     DEXSYInferencePipeline,
     ForwardModel2D,
     available_models,
+    create_run_output_dir,
     is_3c_model,
     list_available_checkpoints,
     list_available_checkpoints_3d,
