@@ -16,8 +16,11 @@ def resolve_repo_root() -> Path:
 
 REPO_ROOT = resolve_repo_root()
 CHECKPOINTS_DIR = REPO_ROOT / "checkpoints_2d"
+CHECKPOINTS_DIR_3D = REPO_ROOT / "checkpoints_3d"
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "outputs" / "inference"
 DEFAULT_MODEL_NAME = "attention_unet"
+
+# 2C models (using checkpoints_2d)
 DEFAULT_CHECKPOINTS = {
     "attention_unet": "attention_unet/attention_unet_best_model.pt",
     "plain_unet": "plain_unet/best_model.pt",
@@ -28,18 +31,44 @@ DEFAULT_CHECKPOINTS = {
     "2d_ilt": None,  # ILT doesn't require a checkpoint
 }
 
+# 3C models (using checkpoints_3d)
+DEFAULT_CHECKPOINTS_3D = {
+    "attention_unet_3c": "attention_unet_3c",
+    "plain_unet_3c": "plain_unet_3c",
+    "pinn_3c": "pinn_3c",
+    "deep_unfolding_3c": "deep_unfolding_3c",
+    "diffusion_refiner": "diffusion_refiner",
+    "3d_ilt": None,  # ILT doesn't require a checkpoint
+}
 
-def available_models() -> list[str]:
-    """Return supported high-level model names."""
-    return sorted(DEFAULT_CHECKPOINTS.keys())
+# All models combined
+ALL_MODELS = {**DEFAULT_CHECKPOINTS, **DEFAULT_CHECKPOINTS_3D}
+
+
+def is_3c_model(model_name: str) -> bool:
+    """Check if a model is a 3C model."""
+    return model_name in DEFAULT_CHECKPOINTS_3D
+
+
+def available_models(include_3c: bool = True) -> list[str]:
+    """Return supported model names."""
+    models = list(ALL_MODELS.keys()) if include_3c else list(DEFAULT_CHECKPOINTS.keys())
+    return sorted(models)
 
 
 def list_available_checkpoints(checkpoints_dir: str | Path | None = None) -> list[Path]:
-    """List bundled checkpoint files."""
+    """List bundled checkpoint files for 2C models."""
     directory = CHECKPOINTS_DIR if checkpoints_dir is None else Path(checkpoints_dir)
     if not directory.exists():
         return []
     return sorted(path for path in directory.rglob("*.pt") if path.is_file())
+
+
+def list_available_checkpoints_3d() -> list[Path]:
+    """List bundled checkpoint files for 3C models."""
+    if not CHECKPOINTS_DIR_3D.exists():
+        return []
+    return sorted(path for path in CHECKPOINTS_DIR_3D.rglob("*.pt") if path.is_file())
 
 
 def resolve_checkpoint_path(
@@ -54,9 +83,27 @@ def resolve_checkpoint_path(
         return path
 
     # ILT doesn't need a checkpoint
-    if model_name == "2d_ilt":
+    if model_name in ("2d_ilt", "3d_ilt"):
         return None
 
+    # Check if 3C model
+    if model_name in DEFAULT_CHECKPOINTS_3D:
+        model_dir = DEFAULT_CHECKPOINTS_3D[model_name]
+        if model_dir is None:
+            return None
+        root_3d = CHECKPOINTS_DIR_3D / model_dir
+        if root_3d.exists():
+            # Find best_model.pt in timestamped subdirectories
+            best_models = list(root_3d.glob("*/best_model.pt"))
+            if best_models:
+                return sorted(best_models, key=lambda p: p.stat().st_mtime)[-1]
+            # Fallback: look for any .pt file
+            all_pts = list(root_3d.glob("**/*.pt"))
+            if all_pts:
+                return sorted(all_pts, key=lambda p: p.stat().st_mtime)[-1]
+        return None
+
+    # 2C model
     try:
         filename = DEFAULT_CHECKPOINTS[model_name]
     except KeyError as exc:
@@ -64,7 +111,7 @@ def resolve_checkpoint_path(
             f"Unknown model '{model_name}'. Available models: {available_models()}"
         ) from exc
     if filename is None:
-        return None  # e.g., 2d_ilt
+        return None
     return CHECKPOINTS_DIR / filename
 
 

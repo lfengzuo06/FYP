@@ -27,12 +27,13 @@ import matplotlib.pyplot as plt
 
 from improved_2d_dexsy import (
     CHECKPOINTS_DIR,
+    CHECKPOINTS_DIR_3D,
     DEXSYInferencePipeline,
     ForwardModel2D,
     available_models,
-    create_output_archive,
-    create_run_output_dir,
+    is_3c_model,
     list_available_checkpoints,
+    list_available_checkpoints_3d,
     load_matrix,
     resolve_checkpoint_path,
     save_prediction_result,
@@ -40,19 +41,48 @@ from improved_2d_dexsy import (
 )
 from dexsy_core.metrics import compute_metrics_dict
 
+# 2C and 3C checkpoint choices
+CHECKPOINT_CHOICES_2D = [
+    str(path.relative_to(CHECKPOINTS_DIR))
+    for path in list_available_checkpoints()
+]
+CHECKPOINT_CHOICES_3D = [
+    str(path.relative_to(CHECKPOINTS_DIR_3D))
+    for path in list_available_checkpoints_3d()
+]
+CHECKPOINT_CHOICES = CHECKPOINT_CHOICES_2D + CHECKPOINT_CHOICES_3D
 
-def default_checkpoint_choice(model_name: str) -> str | None:
-    """Pick the preferred checkpoint shown in the dropdown for a model."""
-    default_path = resolve_checkpoint_path(model_name=model_name)
-    if default_path is None:
-        return None
-    try:
-        candidate = str(default_path.relative_to(CHECKPOINTS_DIR))
-    except ValueError:
-        candidate = str(default_path)
-    if candidate in CHECKPOINT_CHOICES:
-        return candidate
-    return CHECKPOINT_CHOICES[0] if CHECKPOINT_CHOICES else None
+
+def _get_model_filtered_checkpoints(model_name: str) -> list[str]:
+    """Get checkpoint choices filtered to a specific model folder."""
+    if model_name in ("2d_ilt", "3d_ilt"):
+        return []  # ILT doesn't need checkpoints
+
+    # Determine which checkpoint list to use
+    is_3c = is_3c_model(model_name)
+    choices = CHECKPOINT_CHOICES_3D if is_3c else CHECKPOINT_CHOICES_2D
+
+    # Build prefix based on model type
+    model_prefix_map = {
+        "attention_unet": "attention_unet/",
+        "plain_unet": "plain_unet/",
+        "pinn": "pinn" if is_3c else "pinn/",
+        "deep_unfolding": "deep_unfolding" if is_3c else "deep_unfolding/",
+        "deeponet": "deeponet/",
+        "fno": "fno/",
+        "attention_unet_3c": "attention_unet_3c/",
+        "plain_unet_3c": "plain_unet_3c/",
+        "pinn_3c": "pinn_3c/",
+        "deep_unfolding_3c": "deep_unfolding_3c/",
+        "diffusion_refiner": "diffusion_refiner/",
+    }
+    model_prefix = model_prefix_map.get(model_name, f"{model_name}/")
+
+    filtered = [c for c in choices if c.startswith(model_prefix)]
+    if not filtered:
+        # Fallback: try without folder prefix
+        filtered = [c for c in choices if model_name.replace("_3c", "") in c.lower()]
+    return filtered
 
 
 @dataclass
@@ -62,6 +92,7 @@ class SignalInputResult:
     ground_truth: np.ndarray | None
     params: dict
     input_method: str  # "params" | "random" | "image"
+    n_compartments: int = 2  # 2 or 3
 
 
 @dataclass
@@ -77,34 +108,20 @@ class InferenceResult:
     metadata: dict = field(default_factory=dict)
 
 
-CHECKPOINT_CHOICES = [
-    str(path.relative_to(CHECKPOINTS_DIR))
-    for path in list_available_checkpoints()
-]
-
-
-def _get_model_filtered_checkpoints(model_name: str) -> list[str]:
-    """Get checkpoint choices filtered to a specific model folder."""
-    if model_name == "2d_ilt":
-        return []  # ILT doesn't need checkpoints
-
-    model_prefix = f"{model_name}/"
-    filtered = [c for c in CHECKPOINT_CHOICES if c.startswith(model_prefix)]
-    if not filtered:
-        # Fallback: try without folder prefix (some checkpoints might be flat)
-        filtered = [c for c in CHECKPOINT_CHOICES if model_name in c.lower()]
-    return filtered
-
-
 def default_checkpoint_choice(model_name: str) -> str | None:
     """Pick the preferred checkpoint shown in the dropdown for a model."""
     default_path = resolve_checkpoint_path(model_name=model_name)
     if default_path is None:
         return None
     try:
+        # Try relative to 2D checkpoint dir first
         candidate = str(default_path.relative_to(CHECKPOINTS_DIR))
     except ValueError:
-        candidate = str(default_path)
+        try:
+            # Try relative to 3D checkpoint dir
+            candidate = str(default_path.relative_to(CHECKPOINTS_DIR_3D))
+        except ValueError:
+            candidate = str(default_path)
     if candidate in CHECKPOINT_CHOICES:
         return candidate
     return CHECKPOINT_CHOICES[0] if CHECKPOINT_CHOICES else None
@@ -235,6 +252,14 @@ def _generate_parametric(
         params["exchange_rates"] = {"0-1": float(exchange_rate)}
         params["n_compartments"] = 2
 
+        return SignalInputResult(
+            signal=signal.astype(np.float32),
+            ground_truth=clean_spectrum.astype(np.float32),
+            params=params,
+            input_method="params",
+            n_compartments=2,
+        )
+
     else:
         # 3-compartment: build spectrum manually to match user-specified parameters
         vf1 = volume_fraction
@@ -338,10 +363,8 @@ def _generate_parametric(
         ground_truth=spectrum.astype(np.float32),
         params=params,
         input_method="params",
+        n_compartments=n_compartments,
     )
-
-
-def _generate_random(n_compartments: int) -> SignalInputResult:
     """Generate random signal."""
     fm = ForwardModel2D()
 
@@ -355,6 +378,7 @@ def _generate_random(n_compartments: int) -> SignalInputResult:
         ground_truth=spectrum.astype(np.float32),
         params=params,
         input_method="random",
+        n_compartments=n_compartments,
     )
 
 
@@ -423,8 +447,13 @@ def _run_inference(
     ground_truth: np.ndarray | None,
 ) -> InferenceResult:
     """Run inference with the selected model."""
+    is_3c = is_3c_model(model_name)
+
     if checkpoint_name:
-        checkpoint_path = (CHECKPOINTS_DIR / checkpoint_name).resolve()
+        if is_3c:
+            checkpoint_path = (CHECKPOINTS_DIR_3D / checkpoint_name).resolve()
+        else:
+            checkpoint_path = (CHECKPOINTS_DIR / checkpoint_name).resolve()
     else:
         checkpoint_path = resolve_checkpoint_path(model_name=model_name)
 
@@ -850,6 +879,7 @@ def build_app():
                 ground_truth=None,
                 params={"shape": shape_val, "source": str(file_path)},
                 input_method="image",
+                n_compartments=2,  # Default to 2C for uploaded images
             )
             fig, summary = _generate_preview_plot(result)
             info = {
@@ -891,6 +921,35 @@ def build_app():
             fn=confirm_input,
             inputs=[input_state],
             outputs=[current_input_display, inference_status],
+        )
+
+        # --- Update Model Dropdown based on n_compartments ---
+        def update_model_choices(state_dict):
+            if state_dict is None:
+                return gr.update(choices=available_models())
+
+            result = SignalInputResult(**state_dict)
+            n_comp = result.n_compartments
+
+            if n_comp == 3:
+                # 3C mode: only show 3C models
+                models_3c = [
+                    "attention_unet_3c", "plain_unet_3c", "pinn_3c",
+                    "deep_unfolding_3c", "diffusion_refiner", "3d_ilt"
+                ]
+                return gr.update(choices=models_3c)
+            else:
+                # 2C mode: only show 2C models
+                models_2c = [
+                    "attention_unet", "plain_unet", "pinn",
+                    "deep_unfolding", "deeponet", "fno", "2d_ilt"
+                ]
+                return gr.update(choices=models_2c)
+
+        input_state.change(
+            fn=update_model_choices,
+            inputs=[input_state],
+            outputs=[model_name],
         )
 
         # --- Clear ---

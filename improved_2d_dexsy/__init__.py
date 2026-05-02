@@ -15,12 +15,18 @@ from pathlib import Path
 # Import configuration helpers (these remain here as they're app-specific)
 from .config import (
     CHECKPOINTS_DIR,
+    CHECKPOINTS_DIR_3D,
     DEFAULT_CHECKPOINTS,
+    DEFAULT_CHECKPOINTS_3D,
     DEFAULT_MODEL_NAME,
     DEFAULT_OUTPUT_ROOT,
     InferenceConfig,
+    available_models,
     create_run_output_dir,
+    is_3c_model,
     list_available_checkpoints,
+    list_available_checkpoints_3d,
+    resolve_checkpoint_path,
     resolve_device,
     resolve_output_root,
     resolve_repo_root,
@@ -96,6 +102,13 @@ from models_2d.neural_operators.model import (
 from models_2d.neural_operators import train as neural_op_train
 from models_2d.neural_operators import inference as neural_op_inference
 
+# Import 3D model inference pipelines
+from models_3d.attention_unet.inference import InferencePipeline3C as AttentionInferencePipeline3D
+from models_3d.plain_unet.inference import InferencePipelinePlain3C as PlainInferencePipeline3D
+from models_3d.pinn.inference import PINNInferencePipeline3C as PINNInferencePipeline3D
+from models_3d.deep_unfolding.inference import InferencePipeline3C as DeepUnfoldingInferencePipeline3D
+from models_3d.diffusion_refiner.inference import UncertaintyEstimator as DiffusionRefinerPipeline
+
 
 class DEXSYInferencePipeline:
     """
@@ -106,15 +119,16 @@ class DEXSYInferencePipeline:
 
     Args:
         model_name: Model type ('attention_unet', 'plain_unet', 'pinn', 'deep_unfolding',
-                    'deeponet', 'fno', or '2d_ilt')
+                    'deeponet', 'fno', '2d_ilt', 'attention_unet_3c', 'plain_unet_3c',
+                    'pinn_3c', 'deep_unfolding_3c', 'diffusion_refiner', '3d_ilt')
         checkpoint_path: Path to model checkpoint (not needed for ILT)
         device: Device to use ('cuda', 'cpu', or None for auto)
         forward_model: ForwardModel2D instance
-        alpha: ILT regularization parameter (only for 2d_ilt)
+        alpha: ILT regularization parameter (only for 2d_ilt/3d_ilt)
         model_type: Neural operator type ('deeponet' or 'fno', only for neural operators)
     """
 
-    _MODEL_REGISTRY = {
+    _MODEL_REGISTRY_2D = {
         "attention_unet": AttentionInferencePipeline,
         "plain_unet": PlainInferencePipeline,
         "pinn": PINNInferencePipeline,
@@ -123,6 +137,17 @@ class DEXSYInferencePipeline:
         "fno": NeuralOpInferencePipeline,
         "2d_ilt": ILTInferencePipeline,
     }
+
+    _MODEL_REGISTRY_3D = {
+        "attention_unet_3c": AttentionInferencePipeline3D,
+        "plain_unet_3c": PlainInferencePipeline3D,
+        "pinn_3c": PINNInferencePipeline3D,
+        "deep_unfolding_3c": DeepUnfoldingInferencePipeline3D,
+        "diffusion_refiner": DiffusionRefinerPipeline,
+        "3d_ilt": None,  # Will be handled separately
+    }
+
+    _MODEL_REGISTRY = {**_MODEL_REGISTRY_2D, **_MODEL_REGISTRY_3D}
 
     def __init__(
         self,
@@ -140,12 +165,20 @@ class DEXSYInferencePipeline:
 
         pipeline_class = self._MODEL_REGISTRY[model_name]
 
-        # ILT doesn't need checkpoint_path
-        if model_name == "2d_ilt":
-            self._pipeline = pipeline_class(
-                alpha=alpha,
-                forward_model=forward_model,
-            )
+        # 3D ILT doesn't need checkpoint_path (but ILTInferencePipeline is 2D only)
+        # For 3d_ilt, we'll need to check if there's a 3D ILT implementation
+        if model_name in ("2d_ilt", "3d_ilt"):
+            if model_name == "2d_ilt":
+                self._pipeline = pipeline_class(
+                    alpha=alpha,
+                    forward_model=forward_model,
+                )
+            else:
+                # 3D ILT - use 3D ILT implementation if available
+                raise NotImplementedError(
+                    "3D ILT is not yet implemented. "
+                    "Please use a trained 3D model instead."
+                )
         # Neural operators need model_type parameter
         elif model_name in ("deeponet", "fno"):
             if model_type is not None and model_type != model_name:
@@ -307,9 +340,30 @@ from .io_2d import (
 )
 
 
-def available_models() -> list[str]:
-    """Return supported model names."""
+def available_models_2d() -> list[str]:
+    """Return supported 2D model names."""
     return sorted(DEFAULT_CHECKPOINTS.keys())
+
+
+def available_models_3d() -> list[str]:
+    """Return supported 3D model names."""
+    return sorted(DEFAULT_CHECKPOINTS_3D.keys())
+
+
+def available_models_all() -> list[str]:
+    """Return all supported model names (2D + 3D)."""
+    return sorted(set(DEFAULT_CHECKPOINTS.keys()) | set(DEFAULT_CHECKPOINTS_3D.keys()))
+
+
+# For backwards compatibility, make available_models return all models
+def available_models() -> list[str]:
+    """Return all supported model names."""
+    return available_models_all()
+
+
+def is_3c_model(model_name: str) -> bool:
+    """Check if a model is a 3C model."""
+    return model_name in DEFAULT_CHECKPOINTS_3D
 
 
 def resolve_checkpoint_path(
@@ -323,9 +377,28 @@ def resolve_checkpoint_path(
             path = (resolve_repo_root() / path).resolve()
         return path
 
-    if model_name == "2d_ilt":
+    # ILT doesn't need checkpoint
+    if model_name in ("2d_ilt", "3d_ilt"):
         return None
 
+    # Check 3C models first
+    if model_name in DEFAULT_CHECKPOINTS_3D:
+        model_dir = DEFAULT_CHECKPOINTS_3D[model_name]
+        if model_dir is None:
+            return None
+        root_3d = CHECKPOINTS_DIR_3D / model_dir
+        if root_3d.exists():
+            # Find best_model.pt in timestamped subdirectories
+            best_models = list(root_3d.glob("*/best_model.pt"))
+            if best_models:
+                return sorted(best_models, key=lambda p: p.stat().st_mtime)[-1]
+            # Fallback: look for any .pt file
+            all_pts = list(root_3d.glob("**/*.pt"))
+            if all_pts:
+                return sorted(all_pts, key=lambda p: p.stat().st_mtime)[-1]
+        return None
+
+    # 2D model
     try:
         filename = DEFAULT_CHECKPOINTS[model_name]
     except KeyError as exc:
@@ -337,16 +410,30 @@ def resolve_checkpoint_path(
     return CHECKPOINTS_DIR / filename
 
 
+def list_available_checkpoints_3d() -> list[Path]:
+    """List available 3D checkpoint files."""
+    if not CHECKPOINTS_DIR_3D.exists():
+        return []
+    return sorted(path for path in CHECKPOINTS_DIR_3D.rglob("*.pt") if path.is_file())
+
+
 __all__ = [
     # Configuration
     "CHECKPOINTS_DIR",
+    "CHECKPOINTS_DIR_3D",
     "DEFAULT_CHECKPOINTS",
+    "DEFAULT_CHECKPOINTS_3D",
     "DEFAULT_MODEL_NAME",
     "DEFAULT_OUTPUT_ROOT",
     "InferenceConfig",
     "available_models",
+    "available_models_2d",
+    "available_models_3d",
+    "available_models_all",
     "create_run_output_dir",
+    "is_3c_model",
     "list_available_checkpoints",
+    "list_available_checkpoints_3d",
     "resolve_checkpoint_path",
     "resolve_device",
     "resolve_output_root",
