@@ -1,0 +1,51 @@
+<frozen runpy>:128: RuntimeWarning: 'models_3d.pinn.train' found in sys.modules after import of package 'models_3d.pinn', but prior to execution of 'models_3d.pinn.train'; this may result in unpredictable behaviour
+
+============================================================
+PINN Training on 3C Data
+============================================================
+Device: cuda
+Epochs: 60, Batch size: 8
+Learning rate: 0.001, Weight decay: 0.0001
+Compartments: 3
+
+Generating 3C datasets (n_compartments=3)...
+  train: 9500 samples, noisy signal range [0.0001, 1.0590], label range [0.0000, 0.5546]
+  val: 400 samples, noisy signal range [0.0006, 1.0424], label range [0.0000, 0.4510]
+  test: 100 samples, noisy signal range [0.0001, 1.0345], label range [0.0000, 0.5199]
+
+Model: PINN3C
+  Parameters: 1,350,337
+
+Starting training from epoch 0...
+Epoch   1/60 | Train: 0.0037 | Val: 0.0023 | LR: 1.00e-03 | 5.4s (improved)
+Epoch   2/60 | Train: 0.0024 | Val: 0.0018 | LR: 1.00e-03 | 3.8s (improved)
+Epoch   3/60 | Train: 0.0016 | Val: 0.0011 | LR: 1.00e-03 | 3.8s (improved)
+Epoch   4/60 | Train: 0.0013 | Val: 0.0009 | LR: 1.00e-03 | 3.8s (improved)
+Epoch   5/60 | Train: 0.0011 | Val: 0.0010 | LR: 1.00e-03 | 3.8s
+Epoch   6/60 | Train: 0.0010 | Val: 0.0012 | LR: 1.00e-03 | 3.8s
+Epoch   7/60 | Train: 0.0009 | Val: 0.0010 | LR: 1.00e-03 | 3.8s
+Epoch   8/60 | Train: 0.0009 | Val: 0.0008 | LR: 1.00e-03 | 3.8s
+Epoch   9/60 | Train: 0.0008 | Val: 0.0007 | LR: 1.00e-03 | 3.8s (improved)
+Epoch  10/60 | Train: 0.0008 | Val: 0.0012 | LR: 1.00e-03 | 3.8s
+Epoch  11/60 | Train: 0.0008 | Val: 0.0006 | LR: 1.00e-03 | 3.8s
+Epoch  12/60 | Train: 0.0007 | Val: 0.0006 | LR: 1.00e-03 | 3.8s
+Epoch  13/60 | Train: 0.0007 | Val: 0.0006 | LR: 1.00e-03 | 3.8s
+Epoch  14/60 | Train: 0.0007 | Val: 0.0007 | LR: 1.00e-03 | 3.7s
+Epoch  15/60 | Train: 0.0007 | Val: 0.0006 | LR: 1.00e-03 | 3.7s (improved)
+Epoch  16/60 | Train: 0.0007 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  17/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  18/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  19/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  20/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  21/60 | Train: 0.0006 | Val: 0.0007 | LR: 1.00e-03 | 3.7s
+Epoch  22/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  23/60 | Train: 0.0006 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  24/60 | Train: 0.0006 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+Epoch  25/60 | Train: 0.0006 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+Epoch  26/60 | Train: 0.0005 | Val: 0.0006 | LR: 1.00e-03 | 3.7s
+Epoch  27/60 | Train: 0.0005 | Val: 0.0005 | LR: 1.00e-03 | 3.7s
+
+Early stopping at epoch 27
+
+Best model saved to training_output_3d/pinn_3c/checkpoints_20260502_095025
+Best validation loss: 0.000585
