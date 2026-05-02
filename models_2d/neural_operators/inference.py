@@ -238,6 +238,7 @@ class InferencePipeline:
             summary["mae"] = float(np.mean(np.abs(diff)))
             summary["ground_truth_dei"] = float(compute_dei(ground_truth))
             summary["ground_truth_mass"] = float(ground_truth.sum())
+            summary["dei_error"] = abs(summary["ground_truth_dei"] - summary["dei"])
 
         return summary
 

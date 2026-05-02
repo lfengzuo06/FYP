@@ -202,6 +202,7 @@ class InferencePipeline:
             metrics["ground_truth_dei"] = float(compute_dei(true_array))
             metrics["mse"] = float(np.mean((true_array - reconstructed_spectrum) ** 2))
             metrics["mae"] = float(np.mean(np.abs(true_array - reconstructed_spectrum)))
+            metrics["dei_error"] = abs(metrics["ground_truth_dei"] - metrics["dei"])
 
         return metrics
 

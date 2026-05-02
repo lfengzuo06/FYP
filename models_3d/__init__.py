@@ -17,6 +17,10 @@ from .deep_unfolding.model import DeepUnfolding3C, get_model as get_deep_unfoldi
 from .deep_unfolding.train import train_model as train_deep_unfolding
 from .deep_unfolding.inference import InferencePipeline3C as InferencePipelineDeep3C, predict as predict_deep, predict_batch as predict_batch_deep, load_trained_model as load_deep_unfolding
 
+from .pinn.model import PINN3C, PINNLoss3C, get_model as get_pinn
+from .pinn.train import train_model as train_pinn
+from .pinn.inference import PINNInferencePipeline3C, predict as predict_pinn, predict_batch as predict_batch_pinn, load_trained_model as load_pinn_model
+
 __all__ = [
     # Attention U-Net
     "AttentionUNet3C",
@@ -42,4 +46,13 @@ __all__ = [
     "predict_deep",
     "predict_batch_deep",
     "load_deep_unfolding",
+    # PINN
+    "PINN3C",
+    "PINNLoss3C",
+    "get_pinn",
+    "train_pinn",
+    "PINNInferencePipeline3C",
+    "predict_pinn",
+    "predict_batch_pinn",
+    "load_pinn_model",
 ]
