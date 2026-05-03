@@ -5,3 +5,4 @@ __pycache__/
 .ipynb_checkpoints/
 outputs/
 training_output_2d/
+.git_backup_*/
