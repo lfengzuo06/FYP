@@ -887,7 +887,7 @@ def build_app():
                 noise_sigma=ns,
             )
             fig, summary = _generate_preview_plot(result)
-            return fig, result.params, asdict(result)
+            return fig, to_serializable(result.params), asdict(result)
 
         # --- Parametric Generation (3C) ---
         def gen_3c_params(d1, d2, d3, vf1, vf3, r01, r02, r12, tm, ns):
@@ -905,7 +905,7 @@ def build_app():
                 noise_sigma=ns,
             )
             fig, summary = _generate_preview_plot(result)
-            return fig, result.params, asdict(result)
+            return fig, to_serializable(result.params), asdict(result)
 
         # --- Unified wrapper for parametric generation ---
         def gen_params_wrapper(
@@ -933,7 +933,7 @@ def build_app():
         def gen_random(n_comp):
             result = _generate_random(n_comp)
             fig, summary = _generate_preview_plot(result)
-            return fig, result.params, asdict(result)
+            return fig, to_serializable(result.params), asdict(result)
 
         btn_random.click(
             fn=gen_random,
