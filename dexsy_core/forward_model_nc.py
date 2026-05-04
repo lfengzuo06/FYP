@@ -157,6 +157,17 @@ class ForwardModelNC:
         # Precompute exponent matrices (Step 2)
         self._compute_exponent_matrices()
 
+        # Compute kernel matrix for physics-informed loss
+        self._compute_kernel()
+
+    def _compute_kernel(self):
+        """Precompute the exponential kernel tensor."""
+        D1G, D2G = np.meshgrid(self.D, self.D, indexing="ij")
+        b1G, b2G = np.meshgrid(self.b1, self.b2, indexing="ij")
+        kernel = np.exp(-b1G[..., None, None] * D1G) * np.exp(-b2G[..., None, None] * D2G)
+        self._kernel = kernel.astype(np.float32)
+        self.kernel_matrix = self._kernel.reshape(self.n_b * self.n_b, self.n_d * self.n_d)
+
     def _compute_exponent_matrices(self):
         """
         Compute the exponent matrices A_1 and A_2.
@@ -694,6 +705,7 @@ class ForwardModelNC:
         n_samples: int,
         N: int,
         noise_sigma: Optional[float] = None,
+        noise_sigma_range: Optional[tuple[float, float]] = None,
         return_reference_signal: bool = False,
         **kwargs,
     ) -> tuple:
@@ -704,6 +716,7 @@ class ForwardModelNC:
             n_samples: Number of samples.
             N: Number of compartments.
             noise_sigma: Fixed noise level.
+            noise_sigma_range: Range for random noise sampling (low, high).
             return_reference_signal: Whether to return clean signals.
             **kwargs: Passed to generate_ncompartment_sample.
 
@@ -722,11 +735,17 @@ class ForwardModelNC:
         )
         params_list = []
 
+        # Sample noise levels if range is provided
+        if noise_sigma_range is not None and noise_sigma is None:
+            noise_sigmas = np.random.uniform(noise_sigma_range[0], noise_sigma_range[1], n_samples)
+        else:
+            noise_sigmas = [noise_sigma] * n_samples
+
         for i in range(n_samples):
             if return_reference_signal:
                 f, s, params, clean = self.generate_ncompartment_sample(
                     N=N,
-                    noise_sigma=noise_sigma,
+                    noise_sigma=noise_sigmas[i],
                     return_reference_signal=True,
                     **kwargs,
                 )
@@ -734,7 +753,7 @@ class ForwardModelNC:
             else:
                 f, s, params = self.generate_ncompartment_sample(
                     N=N,
-                    noise_sigma=noise_sigma,
+                    noise_sigma=noise_sigmas[i],
                     **kwargs,
                 )
             F[i] = f
