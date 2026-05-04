@@ -1,0 +1,14 @@
+n_min: 2
+n_max: 7
+n_train: 20000
+n_val: 1000
+n_test: 500
+epochs: 120
+batch_size: 8
+base_filters: 32
+learning_rate: 0.0003
+noise_sigma_range: (0.005, 0.015)
+alpha_n_class: 0.3
+best_val_loss: 0.795290
+best_epoch: 24
+train_time: 924.12s
