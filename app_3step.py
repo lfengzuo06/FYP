@@ -43,6 +43,44 @@ from improved_2d_dexsy import (
 )
 from dexsy_core.metrics import compute_metrics_dict
 
+# Visualization style constants (paper-like, bright and comparable)
+DISPLAY_CMAP = "viridis"
+DISPLAY_INTERPOLATION = "bilinear"
+DISPLAY_CLIP_PERCENTILE = 99.9
+DISPLAY_MIN_VMAX = 1e-6
+
+
+def _shared_linear_display_range(
+    *arrays: np.ndarray | None,
+    clip_percentile: float = DISPLAY_CLIP_PERCENTILE,
+) -> tuple[float, float]:
+    """
+    Compute a shared linear display range for multiple spectra.
+
+    The upper bound is percentile-clipped to brighten weak blobs while keeping
+    a globally consistent color mapping between GT and model output.
+    """
+    valid = []
+    for arr in arrays:
+        if arr is None:
+            continue
+        flat = np.asarray(arr, dtype=np.float64).ravel()
+        if flat.size == 0:
+            continue
+        flat = flat[np.isfinite(flat)]
+        if flat.size == 0:
+            continue
+        valid.append(np.clip(flat, 0.0, None))
+
+    if not valid:
+        return 0.0, 1.0
+
+    all_values = np.concatenate(valid)
+    vmax_raw = float(np.max(all_values))
+    vmax_clip = float(np.percentile(all_values, clip_percentile))
+    vmax = max(min(vmax_raw, vmax_clip), DISPLAY_MIN_VMAX)
+    return 0.0, vmax
+
 # 2C and 3C checkpoint choices
 CHECKPOINT_CHOICES_2D = [
     str(path.relative_to(CHECKPOINTS_DIR))
@@ -129,10 +167,11 @@ def default_checkpoint_choice(model_name: str) -> str | None:
     return CHECKPOINT_CHOICES[0] if CHECKPOINT_CHOICES else None
 
 
-def _plot_heatmap(data: np.ndarray, title: str, cmap: str = "plasma", figsize=(4, 3.5)) -> plt.Figure:
+def _plot_heatmap(data: np.ndarray, title: str, cmap: str = DISPLAY_CMAP, figsize=(4, 3.5)) -> plt.Figure:
     """Create a heatmap figure."""
+    vmin, vmax = _shared_linear_display_range(data)
     fig, ax = plt.subplots(figsize=figsize)
-    im = ax.imshow(data, cmap=cmap, origin="lower")
+    im = ax.imshow(data, cmap=cmap, origin="lower", vmin=vmin, vmax=vmax, interpolation=DISPLAY_INTERPOLATION)
     ax.set_title(title, fontsize=10)
     ax.set_xlabel("D2 / b2 index")
     ax.set_ylabel("D1 / b1 index")
@@ -142,7 +181,7 @@ def _plot_heatmap(data: np.ndarray, title: str, cmap: str = "plasma", figsize=(4
 
 
 def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=None) -> plt.Figure:
-    """Create a 4-panel comparison figure with smooth interpolation and improved colors."""
+    """Create comparison figure with shared GT/pred color mapping and brighter linear display."""
     n_plots = 4 if ground_truth is not None else 3
 
     if n_plots == 4:
@@ -150,62 +189,84 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
     else:
         fig, axes = plt.subplots(1, 3, figsize=(10, 3.2))
 
-    # Signal - keep viridis as original
-    im0 = axes[0].imshow(signal, cmap="viridis", origin="lower", interpolation="lanczos")
+    # Signal
+    im0 = axes[0].imshow(signal, cmap=DISPLAY_CMAP, origin="lower", interpolation=DISPLAY_INTERPOLATION)
     axes[0].set_title("Input Signal", fontsize=10)
     axes[0].set_xlabel("b2 index")
     axes[0].set_ylabel("b1 index")
     plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
     if ground_truth is not None:
-        vmax = max(float(ground_truth.max()), float(prediction.max()), 1e-6)
-        vmin = 0
-        # Ground Truth - use plasma for better visual distinction
-        im1 = axes[1].imshow(ground_truth, cmap="plasma", origin="lower",
-                             vmin=vmin, vmax=vmax, interpolation="lanczos")
+        # Shared linear mapping for GT + model output (with percentile clip for visibility)
+        vmin, vmax = _shared_linear_display_range(ground_truth, prediction)
+
+        im1 = axes[1].imshow(
+            ground_truth,
+            cmap=DISPLAY_CMAP,
+            origin="lower",
+            vmin=vmin,
+            vmax=vmax,
+            interpolation=DISPLAY_INTERPOLATION,
+        )
         gt_title = "Ground Truth"
         if dei_gt is not None:
             gt_title += f"\nDEI={dei_gt:.4f}"
         axes[1].set_title(gt_title, fontsize=10)
         axes[1].set_xlabel("D2 index")
         axes[1].set_ylabel("D1 index")
-        plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        cbar_gt = plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        cbar_gt.set_label(f"Linear (shared, p{DISPLAY_CLIP_PERCENTILE:.1f} clip)", fontsize=8)
 
         # Prediction
-        im2 = axes[2].imshow(prediction, cmap="plasma", origin="lower",
-                             vmin=vmin, vmax=vmax, interpolation="lanczos")
+        im2 = axes[2].imshow(
+            prediction,
+            cmap=DISPLAY_CMAP,
+            origin="lower",
+            vmin=vmin,
+            vmax=vmax,
+            interpolation=DISPLAY_INTERPOLATION,
+        )
         pred_title = "Model Output"
         if dei_pred is not None:
             pred_title += f"\nDEI={dei_pred:.4f}"
         axes[2].set_title(pred_title, fontsize=10)
         axes[2].set_xlabel("D2 index")
         axes[2].set_ylabel("D1 index")
-        plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        cbar_pred = plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        cbar_pred.set_label(f"Linear (shared, p{DISPLAY_CLIP_PERCENTILE:.1f} clip)", fontsize=8)
 
         # Difference - use coolwarm for intuitive +/- coloring
         diff = prediction - ground_truth
         vrange = max(abs(diff.min()), abs(diff.max()), vmax/8)
         im3 = axes[3].imshow(diff, cmap="coolwarm", origin="lower",
-                             vmin=-vrange, vmax=vrange, interpolation="lanczos")
+                             vmin=-vrange, vmax=vrange, interpolation=DISPLAY_INTERPOLATION)
         axes[3].set_title("Difference\n(Pred - GT)", fontsize=10)
         axes[3].set_xlabel("D2 index")
         axes[3].set_ylabel("D1 index")
         plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
     else:
         # No ground truth - just signal and prediction
-        im1 = axes[1].imshow(prediction, cmap="plasma", origin="lower",
-                             interpolation="lanczos")
+        vmin, vmax = _shared_linear_display_range(prediction)
+        im1 = axes[1].imshow(
+            prediction,
+            cmap=DISPLAY_CMAP,
+            origin="lower",
+            vmin=vmin,
+            vmax=vmax,
+            interpolation=DISPLAY_INTERPOLATION,
+        )
         pred_title = "Model Output"
         if dei_pred is not None:
             pred_title += f"\nDEI={dei_pred:.4f}"
         axes[1].set_title(pred_title, fontsize=10)
         axes[1].set_xlabel("D2 index")
         axes[1].set_ylabel("D1 index")
-        plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        cbar_pred = plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
+        cbar_pred.set_label(f"Linear (p{DISPLAY_CLIP_PERCENTILE:.1f} clip)", fontsize=8)
 
-        # Log signal - keep viridis as original
-        im2 = axes[2].imshow(np.log(signal + 1e-6), cmap="viridis",
-                             origin="lower", interpolation="lanczos")
+        # Log signal
+        im2 = axes[2].imshow(np.log(signal + 1e-6), cmap=DISPLAY_CMAP,
+                             origin="lower", interpolation=DISPLAY_INTERPOLATION)
         axes[2].set_title("Log(Signal)", fontsize=10)
         axes[2].set_xlabel("b2 index")
         axes[2].set_ylabel("b1 index")
@@ -404,8 +465,8 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
 
     fig, axes = plt.subplots(1, 3, figsize=(13, 3.5))
 
-    # Signal - keep viridis as original
-    im0 = axes[0].imshow(signal, cmap="viridis", origin="lower", interpolation="lanczos")
+    # Signal
+    im0 = axes[0].imshow(signal, cmap=DISPLAY_CMAP, origin="lower", interpolation=DISPLAY_INTERPOLATION)
     axes[0].set_title("Input Signal", fontsize=11)
     axes[0].set_xlabel("b2 index")
     axes[0].set_ylabel("b1 index")
@@ -413,22 +474,31 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
 
     # Log Signal
     log_signal = np.log(signal + 1e-6)
-    im1 = axes[1].imshow(log_signal, cmap="viridis", origin="lower", interpolation="lanczos")
+    im1 = axes[1].imshow(log_signal, cmap=DISPLAY_CMAP, origin="lower", interpolation=DISPLAY_INTERPOLATION)
     axes[1].set_title("Log(Signal)", fontsize=11)
     axes[1].set_xlabel("b2 index")
     axes[1].set_ylabel("b1 index")
     plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
-    # Ground Truth - use plasma for better visual distinction
+    # Ground Truth (brighter linear display)
     if ground_truth is not None:
-        im2 = axes[2].imshow(ground_truth, cmap="plasma", origin="lower", interpolation="lanczos")
+        vmin, vmax = _shared_linear_display_range(ground_truth)
+        im2 = axes[2].imshow(
+            ground_truth,
+            cmap=DISPLAY_CMAP,
+            origin="lower",
+            vmin=vmin,
+            vmax=vmax,
+            interpolation=DISPLAY_INTERPOLATION,
+        )
         gt_title = "Ground Truth Spectrum"
         if "mixing_time" in params:
             gt_title += f"\nTm={params['mixing_time']:.3f}s"
         axes[2].set_title(gt_title, fontsize=11)
         axes[2].set_xlabel("D2 index")
         axes[2].set_ylabel("D1 index")
-        plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        cbar = plt.colorbar(im2, ax=axes[2], fraction=0.046, pad=0.04)
+        cbar.set_label(f"Linear (p{DISPLAY_CLIP_PERCENTILE:.1f} clip)", fontsize=8)
     else:
         axes[2].axis("off")
         axes[2].set_title("No Ground Truth", fontsize=11)
