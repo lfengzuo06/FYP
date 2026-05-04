@@ -48,6 +48,12 @@ DISPLAY_CMAP = "viridis"
 DISPLAY_INTERPOLATION = "bilinear"
 DISPLAY_CLIP_PERCENTILE = 99.9
 DISPLAY_MIN_VMAX = 1e-6
+DISPLAY_SPECTRUM_SMOOTH_SIGMA = 0.8
+
+try:
+    from scipy.ndimage import gaussian_filter as _scipy_gaussian_filter
+except Exception:  # pragma: no cover - optional dependency fallback
+    _scipy_gaussian_filter = None
 
 
 def _shared_linear_display_range(
@@ -80,6 +86,24 @@ def _shared_linear_display_range(
     vmax_clip = float(np.percentile(all_values, clip_percentile))
     vmax = max(min(vmax_raw, vmax_clip), DISPLAY_MIN_VMAX)
     return 0.0, vmax
+
+
+def _smooth_spectrum_for_display(spectrum: np.ndarray, sigma: float = DISPLAY_SPECTRUM_SMOOTH_SIGMA) -> np.ndarray:
+    """
+    Apply visualization-only smoothing to make peak spreading consistent across panels.
+
+    This does not change the underlying inference result or metrics; it only affects
+    how spectra are rendered in the interface.
+    """
+    arr = np.asarray(spectrum, dtype=np.float64)
+    if sigma <= 0 or _scipy_gaussian_filter is None:
+        return arr
+    smoothed = _scipy_gaussian_filter(arr, sigma=sigma, mode="nearest")
+    smoothed = np.clip(smoothed, 0.0, None)
+    total = float(smoothed.sum())
+    if total > 0:
+        smoothed /= total
+    return smoothed
 
 # 2C and 3C checkpoint choices
 CHECKPOINT_CHOICES_2D = [
@@ -197,11 +221,14 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
     plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
     if ground_truth is not None:
+        gt_display = _smooth_spectrum_for_display(ground_truth)
+        pred_display = _smooth_spectrum_for_display(prediction)
+
         # Shared linear mapping for GT + model output (with percentile clip for visibility)
-        vmin, vmax = _shared_linear_display_range(ground_truth, prediction)
+        vmin, vmax = _shared_linear_display_range(gt_display, pred_display)
 
         im1 = axes[1].imshow(
-            ground_truth,
+            gt_display,
             cmap=DISPLAY_CMAP,
             origin="lower",
             vmin=vmin,
@@ -219,7 +246,7 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
 
         # Prediction
         im2 = axes[2].imshow(
-            prediction,
+            pred_display,
             cmap=DISPLAY_CMAP,
             origin="lower",
             vmin=vmin,
@@ -236,7 +263,7 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
         cbar_pred.set_label(f"Linear (shared, p{DISPLAY_CLIP_PERCENTILE:.1f} clip)", fontsize=8)
 
         # Difference - use coolwarm for intuitive +/- coloring
-        diff = prediction - ground_truth
+        diff = pred_display - gt_display
         vrange = max(abs(diff.min()), abs(diff.max()), vmax/8)
         im3 = axes[3].imshow(diff, cmap="coolwarm", origin="lower",
                              vmin=-vrange, vmax=vrange, interpolation=DISPLAY_INTERPOLATION)
@@ -246,9 +273,10 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
         plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
     else:
         # No ground truth - just signal and prediction
-        vmin, vmax = _shared_linear_display_range(prediction)
+        pred_display = _smooth_spectrum_for_display(prediction)
+        vmin, vmax = _shared_linear_display_range(pred_display)
         im1 = axes[1].imshow(
-            prediction,
+            pred_display,
             cmap=DISPLAY_CMAP,
             origin="lower",
             vmin=vmin,
@@ -333,79 +361,21 @@ def _generate_parametric(
         )
 
     else:
-        # 3-compartment: build spectrum manually to match user-specified parameters
+        # 3-compartment: use shared validation spectrum builder for consistency with 2C path
         vf1 = volume_fraction
         vf3 = volume_fraction_3
         vf2 = max(0.01, 1 - vf1 - vf3)  # Ensure positive
         diffusions = np.array([diffusion_1, diffusion_2, diffusion_3], dtype=np.float64)
         volume_fractions = np.array([vf1, vf2, vf3], dtype=np.float64)
         volume_fractions /= volume_fractions.sum()  # Normalize
-
-        exchange_rates_mat = np.zeros((3, 3), dtype=np.float64)
-        exchange_rates_mat[0, 1] = exchange_rates_mat[1, 0] = exchange_rate_01
-        exchange_rates_mat[0, 2] = exchange_rates_mat[2, 0] = exchange_rate_02
-        exchange_rates_mat[1, 2] = exchange_rates_mat[2, 1] = exchange_rate_12
-
-        # Build weight matrix (same logic as _build_weight_matrix in forward model)
-        exchange_probs = np.zeros_like(exchange_rates_mat)
-        for i in range(3):
-            for j in range(i + 1, 3):
-                prob = 1.0 - np.exp(-exchange_rates_mat[i, j] * mixing_time)
-                exchange_probs[i, j] = prob
-                exchange_probs[j, i] = prob
-
-        offdiag = np.zeros((3, 3), dtype=np.float64)
-        for i in range(3):
-            for j in range(i + 1, 3):
-                offdiag_mass = exchange_probs[i, j] * volume_fractions[i] * volume_fractions[j]
-                offdiag[i, j] = offdiag_mass
-                offdiag[j, i] = offdiag_mass
-
-        row_offdiag = offdiag.sum(axis=1)
-        allowed = 0.49 * volume_fractions
-        scale = 1.0
-        if np.any(row_offdiag > allowed):
-            scale = float(np.min(allowed[row_offdiag > 0] / row_offdiag[row_offdiag > 0]))
-            scale = min(scale, 1.0)
-            offdiag *= scale
-
-        diag = volume_fractions - offdiag.sum(axis=1)
-        diag = np.clip(diag, 1e-8, None)
-        weight_matrix = offdiag.copy()
-        np.fill_diagonal(weight_matrix, diag)
-        weight_matrix = np.clip(weight_matrix, 0.0, None)
-        weight_matrix /= weight_matrix.sum() + 1e-12
-
-        # Project to grid
-        base_indices = [fm._nearest_diffusion_index(d) for d in diffusions]
-        smoothing_sigma = 0.8
-        spectrum = np.zeros((64, 64), dtype=np.float64)
-
-        for i in range(3):
-            for j in range(3):
-                weight = float(weight_matrix[i, j])
-                if weight <= 0:
-                    continue
-                ii = base_indices[i]
-                jj = base_indices[j]
-                if ii == jj:
-                    # Diagonal - spread along diagonal
-                    radius = 3
-                    for k in range(-radius, radius + 1):
-                        if 0 <= ii + k < 64:
-                            spectrum[ii + k, ii + k] += weight * np.exp(-0.5 * (k / smoothing_sigma) ** 2)
-                else:
-                    # Off-diagonal - 2D Gaussian
-                    radius = int(np.ceil(3 * smoothing_sigma))
-                    for di in range(-radius, radius + 1):
-                        for dj in range(-radius, radius + 1):
-                            ii2 = ii + di
-                            jj2 = jj + dj
-                            if 0 <= ii2 < 64 and 0 <= jj2 < 64:
-                                spectrum[ii2, jj2] += weight * np.exp(-0.5 * ((di ** 2 + dj ** 2) / (smoothing_sigma ** 2)))
-
-        spectrum = np.clip(spectrum, 0.0, None)
-        spectrum /= spectrum.sum() + 1e-12
+        spectrum, _clean_signal, params = fm.generate_3c_validation_spectrum(
+            diffusions=diffusions,
+            volume_fractions=volume_fractions,
+            exchange_rates=(exchange_rate_01, exchange_rate_02, exchange_rate_12),
+            mixing_time=mixing_time,
+            jitter_pixels=0,
+            smoothing_sigma=0.8,
+        )
         spectrum = spectrum.astype(np.float32)
 
         # Generate signal with noise
@@ -415,20 +385,7 @@ def _generate_parametric(
             normalize=True,
         ).astype(np.float32)
 
-        params = {
-            "n_compartments": 3,
-            "mixing_time": mixing_time,
-            "noise_sigma": noise_sigma,
-            "diffusions": diffusions.tolist(),
-            "volume_fractions": volume_fractions.tolist(),
-            "exchange_rates": {
-                "0-1": float(exchange_rate_01),
-                "0-2": float(exchange_rate_02),
-                "1-2": float(exchange_rate_12),
-            },
-            "weight_matrix": weight_matrix,
-            "smoothing_sigma": smoothing_sigma,
-        }
+        params["noise_sigma"] = noise_sigma
 
     return SignalInputResult(
         signal=signal.astype(np.float32),
@@ -482,9 +439,10 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
 
     # Ground Truth (brighter linear display)
     if ground_truth is not None:
-        vmin, vmax = _shared_linear_display_range(ground_truth)
+        gt_display = _smooth_spectrum_for_display(ground_truth)
+        vmin, vmax = _shared_linear_display_range(gt_display)
         im2 = axes[2].imshow(
-            ground_truth,
+            gt_display,
             cmap=DISPLAY_CMAP,
             origin="lower",
             vmin=vmin,
