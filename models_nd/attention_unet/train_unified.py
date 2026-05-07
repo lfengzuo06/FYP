@@ -36,7 +36,7 @@ _root = Path(__file__).parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from dexsy_core.forward_model_nc import ForwardModelNC
+from dexsy_core.forward_model import ForwardModel2D, create_forward_model
 from dexsy_core.preprocessing import build_model_inputs
 
 from .model import AttentionUNetUnified, AttentionUNetND, UnifiedLoss, PhysicsInformedLossND
@@ -47,7 +47,7 @@ class DEXSYDatasetMixedN(Dataset):
 
     def __init__(
         self,
-        forward_model: ForwardModelNC,
+        forward_model: ForwardModel2D,
         n_samples: int,
         n_min: int = 2,
         n_max: int = 7,
@@ -177,6 +177,8 @@ def train_unified_model(
     seed: int = 42,
     device: str = None,
     checkpoint_path: str = None,
+    n_d: int = 64,
+    n_b: int = 64,
 ) -> tuple:
     """
     Train the unified Attention U-Net model on Mixed N-Compartment DEXSY data.
@@ -202,12 +204,14 @@ def train_unified_model(
         seed: Random seed
         device: Device to use ('cuda', 'cpu', or None for auto)
         checkpoint_path: Optional path to load existing weights
+        n_d: Grid size for diffusion dimension
+        n_b: Grid size for b-value dimension
 
     Returns:
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "checkpoints_nd" / f"unified_n{n_min}_{n_max}"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_nd" / f"unified_n{n_min}_{n_max}_g{n_d}"
     else:
         output_dir = Path(output_dir)
 
@@ -223,8 +227,8 @@ def train_unified_model(
 
     set_seed(seed)
 
-    # Initialize forward model
-    forward_model = ForwardModelNC(n_d=64, n_b=64)
+    # Initialize forward model using factory function
+    forward_model = create_forward_model(n_d=n_d, n_b=n_b)
 
     # Generate datasets
     print(f"\nGenerating Mixed N datasets (N in [{n_min}, {n_max}])...")
@@ -486,6 +490,8 @@ def train_unified_model(
         'config': {
             'base_filters': base_filters,
             'in_channels': 3,
+            'n_d': n_d,
+            'n_b': n_b,
             'n_min': n_min,
             'n_max': n_max,
             'n_classes': model.n_classes,
@@ -519,6 +525,8 @@ def train_unified_model(
     # Save config
     config_path = model_dir / "config.txt"
     with open(config_path, 'w') as f:
+        f.write(f"n_d: {n_d}\n")
+        f.write(f"n_b: {n_b}\n")
         f.write(f"n_min: {n_min}\n")
         f.write(f"n_max: {n_max}\n")
         f.write(f"n_train: {n_train}\n")
@@ -556,7 +564,14 @@ def main():
     parser.add_argument('--n_max', type=int, default=7, help='Maximum number of compartments')
     parser.add_argument('--alpha_n_class', type=float, default=0.5, help='Classification loss weight')
     parser.add_argument('--n_test', type=int, default=100, help='Number of test samples')
+    parser.add_argument('--n_d', type=int, default=64, help='Grid size for diffusion dimension')
+    parser.add_argument('--n_b', type=int, default=64, help='Grid size for b-value dimension')
+    parser.add_argument('--grid_size', type=int, default=64, help='Shorthand: set both n_d and n_b')
     args = parser.parse_args()
+
+    # Use grid_size shorthand if provided
+    n_d = args.grid_size if args.grid_size != 64 else args.n_d
+    n_b = args.grid_size if args.grid_size != 64 else args.n_b
 
     train_unified_model(
         output_dir=args.output_dir,
@@ -571,6 +586,8 @@ def main():
         n_max=args.n_max,
         alpha_n_class=args.alpha_n_class,
         seed=args.seed,
+        n_d=n_d,
+        n_b=n_b,
     )
 
 

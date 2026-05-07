@@ -92,8 +92,8 @@ class AttentionUNet3C(nn.Module):
     - Decoder: UpSample + Attention Gate + Conv + RDB
     - Skip connections carry multi-scale features
 
-    Input: (batch, 3, 64, 64) for 3-channel input (signal + auxiliary features)
-    Output: (batch, 1, 64, 64) normalized distribution
+    Input: (batch, 3, grid_size, grid_size) for 3-channel input (grid_size: 16 or 64)
+    Output: (batch, 1, grid_size, grid_size) normalized distribution
     """
 
     def __init__(self, in_channels: int = 3, base_filters: int = 32):

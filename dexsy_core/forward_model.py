@@ -24,6 +24,103 @@ except ImportError:  # pragma: no cover - exercised only in lighter environments
     _scipy_gaussian_filter = None
 
 
+# =============================================================================
+# Grid Size Profiles
+# =============================================================================
+
+GRID_PROFILES = {
+    64: {
+        "d_min": 5e-12,
+        "d_max": 5e-8,
+        "jitter_pixels": 1,
+        "min_index_separation": 4,
+        "smoothing_sigma_range": (0.65, 1.15),
+        "g_max": 1.5,
+        "delta": 0.003,
+        "DELTA": 0.01,
+        # Compartment ranges for 64-grid
+        "compartment_ranges": {
+            "intracellular": (5e-12, 3e-11),
+            "extracellular": (3e-11, 5e-9),
+            "fast": (5e-9, 5e-8),
+        },
+    },
+    16: {
+        "d_min": 1e-11,
+        "d_max": 1e-8,
+        "jitter_pixels": 0,
+        "min_index_separation": 2,
+        "smoothing_sigma_range": (0.4, 0.8),
+        "g_max": 1.5,
+        "delta": 0.003,
+        "DELTA": 0.01,
+        # Compartment ranges for 16-grid (16 points from 1e-11 to 1e-8)
+        # Index distribution: 0=1e-11, 5=1e-10, 10=1e-9, 15=1e-8
+        # With min_separation=2, compartments should be at least 2 indices apart
+        # intracellular: indices 1-3 (1.6e-11 to 4e-11)
+        # extracellular: indices 6-9 (1.6e-10 to 6.3e-10)
+        # fast: indices 11-14 (1.6e-9 to 6.3e-9)
+        "compartment_ranges": {
+            "intracellular": (1.5e-11, 4e-11),
+            "extracellular": (1e-10, 7e-10),
+            "fast": (1.5e-9, 7e-9),
+        },
+    },
+}
+
+
+def create_forward_model(
+    n_d: int = 64,
+    n_b: int = 64,
+    profile: int | None = None,
+    **kwargs,
+) -> "ForwardModel2D":
+    """
+    Factory function to create ForwardModel2D with profile or explicit parameters.
+
+    When n_d matches a known profile (16 or 64), profile mode is automatically used
+    unless explicitly overridden by setting profile=None.
+
+    Args:
+        n_d: Number of diffusion grid points.
+        n_b: Number of b-value grid points.
+        profile: Grid size profile (16 or 64). If provided, uses profile settings
+            and overrides n_d/n_b with the profile value. If None (default), auto-detects
+            based on n_d matching a known profile.
+        **kwargs: Override any profile parameter.
+
+    Returns:
+        ForwardModel2D instance configured with the specified grid size.
+
+    Examples:
+        # Auto-detect profile from n_d
+        fm = create_forward_model(n_d=16, n_b=16)  # Uses 16 profile
+
+        # Explicit profile
+        fm = create_forward_model(profile=16)
+
+        # Explicit override (use explicit params even if n_d=16)
+        fm = create_forward_model(n_d=16, n_b=16, profile=None)
+
+        # With custom overrides
+        fm = create_forward_model(profile=16, jitter_pixels=1)
+    """
+    # Auto-detect profile if n_d matches a known profile and profile is not explicitly set
+    if profile is None and n_d in GRID_PROFILES:
+        profile = n_d
+
+    if profile is not None:
+        profile_size = int(profile)
+        if profile_size not in GRID_PROFILES:
+            raise ValueError(f"Unknown profile: {profile_size}. Use 16 or 64.")
+        config = GRID_PROFILES[profile_size].copy()
+        config["n_d"] = profile_size
+        config["n_b"] = profile_size
+        config.update(kwargs)
+        return ForwardModel2D(**config)
+    return ForwardModel2D(n_d=n_d, n_b=n_b, **kwargs)
+
+
 def _gaussian_filter(image: np.ndarray, sigma: float) -> np.ndarray:
     """Apply Gaussian smoothing with a scipy fallback-free numpy implementation."""
     if sigma <= 0:
@@ -160,6 +257,7 @@ class ForwardModel2D:
         smoothing_sigma_range: tuple = (0.65, 1.15),
         min_index_separation: int = 4,
         spectral_broadening_mode: str = "directional",
+        compartment_ranges: dict | None = None,
     ):
         """
         Initialise the paper-style 2D DEXSY forward model.
@@ -188,6 +286,8 @@ class ForwardModel2D:
                 inflation caused by isotropic blurring of diagonal peaks into
                 off-diagonal bins. Use "isotropic" for the legacy whole-image
                 Gaussian convolution.
+            compartment_ranges: Optional dict of compartment name -> (d_min, d_max).
+                If None, uses default ranges.
         """
         self.n_d = n_d
         self.n_b = n_b
@@ -206,11 +306,15 @@ class ForwardModel2D:
             raise ValueError(f"Unknown spectral_broadening_mode: {spectral_broadening_mode}")
         self.spectral_broadening_mode = spectral_broadening_mode
 
-        self.compartment_ranges = {
-            "intracellular": (5e-12, 3e-11),
-            "extracellular": (3e-11, 5e-9),
-            "fast": (5e-9, 5e-8),
-        }
+        # Use provided compartment_ranges or default
+        if compartment_ranges is not None:
+            self.compartment_ranges = compartment_ranges
+        else:
+            self.compartment_ranges = {
+                "intracellular": (5e-12, 3e-11),
+                "extracellular": (3e-11, 5e-9),
+                "fast": (5e-9, 5e-8),
+            }
 
         self.D1 = np.logspace(np.log10(d_min), np.log10(d_max), n_d)
         self.D2 = np.logspace(np.log10(d_min), np.log10(d_max), n_d)
@@ -628,13 +732,163 @@ class ForwardModel2D:
         """
         return self.generate_2compartment_paper(**kwargs)
 
+    def generate_ncompartment_sample(
+        self,
+        N: int,
+        phi: np.ndarray = None,
+        D: np.ndarray = None,
+        kappa: np.ndarray = None,
+        mixing_time: float = None,
+        noise_sigma: float = None,
+        noise_sigma_range: tuple = (0.005, 0.015),
+        jitter_pixels: int = None,
+        smoothing_sigma: float = None,
+        noise_model: str = "rician",
+        normalize: bool = None,
+        return_reference_signal: bool = False,
+    ) -> tuple:
+        """
+        Generate one N-compartment DEXSY sample with arbitrary N (2-7).
+
+        For N=2 or N=3, uses the existing paper-style generators.
+        For N>3, samples from the predefined compartment ranges cyclically.
+
+        Args:
+            N: Number of compartments (2-7).
+            phi: Volume fractions of shape (N,). If None, sampled from Dirichlet.
+            D: Compartment diffusion values of shape (N,). If None, sampled.
+            kappa: Exchange rate matrix of shape (N, N). If None, sampled.
+            mixing_time: Mixing time in seconds.
+            noise_sigma: Fixed noise level.
+            noise_sigma_range: Range for random noise sampling.
+            jitter_pixels: Peak jitter in pixels.
+            smoothing_sigma: Gaussian broadening sigma.
+            noise_model: "rician", "gaussian", or "none".
+            normalize: Whether to normalize signal.
+            return_reference_signal: If True, also return clean signal.
+
+        Returns:
+            f: 2D spectrum (n_d, n_d).
+            S: Signal (n_b, n_b).
+            params: Dictionary with ground truth parameters.
+            [S_clean]: Optional clean signal if return_reference_signal=True.
+        """
+        if N == 2:
+            return self.generate_2compartment_paper(
+                mixing_time=mixing_time,
+                noise_sigma=noise_sigma,
+                noise_sigma_range=noise_sigma_range,
+                noise_model=noise_model,
+                normalize=normalize,
+                jitter_pixels=jitter_pixels,
+                smoothing_sigma=smoothing_sigma,
+                return_reference_signal=return_reference_signal,
+            )
+        elif N == 3:
+            return self.generate_3compartment_paper(
+                mixing_time=mixing_time,
+                noise_sigma=noise_sigma,
+                noise_sigma_range=noise_sigma_range,
+                noise_model=noise_model,
+                normalize=normalize,
+                jitter_pixels=jitter_pixels,
+                smoothing_sigma=smoothing_sigma,
+                return_reference_signal=return_reference_signal,
+            )
+
+        # For N > 3, use a generic approach
+        if N < 2:
+            raise ValueError("N must be at least 2")
+
+        mixing_time = self._sample_mixing_time(mixing_time)
+        noise_sigma = self._sample_noise_sigma(noise_sigma, noise_sigma_range)
+
+        # Sample volume fractions (Dirichlet)
+        if phi is None:
+            phi = np.random.dirichlet(np.ones(N) * 2.0)
+
+        # Sample diffusion values
+        if D is None:
+            # Cycle through compartment ranges
+            ranges = list(self.compartment_ranges.values())
+            D = np.array([
+                self._sample_log_uniform(ranges[i % len(ranges)])
+                for i in range(N)
+            ], dtype=np.float64)
+
+        # Sample exchange rates
+        if kappa is None:
+            kappa = np.zeros((N, N), dtype=np.float64)
+            for i in range(N):
+                for j in range(i + 1, N):
+                    rate = self._sample_exchange_rate()
+                    kappa[i, j] = rate
+                    kappa[j, i] = rate
+
+        # Build exchange probability matrix
+        exchange_probs = np.zeros((N, N), dtype=np.float64)
+        for i in range(N):
+            for j in range(i + 1, N):
+                prob = self._exchange_probability(kappa[i, j], mixing_time)
+                exchange_probs[i, j] = prob
+                exchange_probs[j, i] = prob
+
+        # Build weight matrix
+        weight_matrix, exchange_scale = self._build_weight_matrix(phi, exchange_probs)
+
+        # Project to grid
+        effective_jitter = self.jitter_pixels if jitter_pixels is None else jitter_pixels
+        spectrum, used_sigma, jittered_indices = self._project_weight_matrix(
+            diffusions=D,
+            weight_matrix=weight_matrix,
+            jitter_pixels=effective_jitter,
+            smoothing_sigma=smoothing_sigma,
+        )
+
+        # Compute signals
+        clean_signal = self.compute_signal(
+            spectrum, noise_sigma=0.0, normalize=normalize, noise_model=None
+        )
+        noisy_signal = self.compute_signal(
+            spectrum, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model
+        )
+
+        # Build params dictionary
+        params = {
+            "n_compartments": N,
+            "mixing_time": float(mixing_time),
+            "noise_sigma": float(noise_sigma),
+            "baseline_snr": float(1.0 / max(noise_sigma, 1e-12)),
+            "diffusions": D.tolist(),
+            "volume_fractions": phi.tolist(),
+            "exchange_rates": {
+                f"{i}-{j}": float(kappa[i, j])
+                for i in range(N) for j in range(i + 1, N)
+            },
+            "exchange_probabilities": {
+                f"{i}-{j}": float(exchange_probs[i, j])
+                for i in range(N) for j in range(i + 1, N)
+            },
+            "exchange_probability_scale": float(exchange_scale),
+            "weight_matrix": weight_matrix.copy(),
+            "smoothing_sigma": float(used_sigma),
+            "jitter_pixels": int(effective_jitter),
+            "jittered_indices": jittered_indices,
+            "theoretical_dei": compute_weight_matrix_dei(weight_matrix),
+        }
+
+        if return_reference_signal:
+            return spectrum, noisy_signal, params, clean_signal
+        return spectrum, noisy_signal, params
+
     def generate_sample(self, n_compartments: int = 2, **kwargs) -> tuple:
-        """Generate one 2C or 3C paper-style sample."""
+        """Generate one N-compartment paper-style sample (N=2-7)."""
         if n_compartments == 2:
             return self.generate_2compartment_paper(**kwargs)
         if n_compartments == 3:
             return self.generate_3compartment_paper(**kwargs)
-        raise ValueError(f"Unsupported number of compartments: {n_compartments}")
+        # For N > 3, use the generic N-compartment generator
+        return self.generate_ncompartment_sample(N=n_compartments, **kwargs)
 
     def generate_batch(
         self,
@@ -652,7 +906,8 @@ class ForwardModel2D:
             n_samples: Number of samples to generate.
             noise_sigma: Optional fixed noise level.
             noise_sigma_range: Paper-style continuous noise range.
-            n_compartments: 2 or 3.
+            n_compartments: Number of compartments (2-7).
+            return_reference_signal: Whether to return clean signals.
             **kwargs: Passed to the selected generator.
         """
         F = np.zeros((n_samples, self.n_d, self.n_d), dtype=np.float32)

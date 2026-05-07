@@ -92,6 +92,9 @@ class AttentionUNet2D(nn.Module):
     - Bottleneck: Conv + RDB
     - Decoder: UpSample + Attention Gate + Conv + RDB
     - Skip connections carry multi-scale features
+
+    Input: (batch, in_channels, grid_size, grid_size) for multi-channel input (grid_size: 16 or 64)
+    Output: (batch, 1, grid_size, grid_size) normalized distribution
     """
 
     def __init__(self, in_channels: int = 3, base_filters: int = 32):

@@ -89,6 +89,17 @@ class InferencePipeline3C:
         # Load model
         self.model, self.model_metadata = self._load_model()
 
+    def _validate_input_shape(self, signal: np.ndarray) -> None:
+        """Validate input signal shape matches the model's expected grid size."""
+        expected_shape = (self.forward_model.n_d, self.forward_model.n_b)
+        actual_shape = signal.shape[-2:]
+        if actual_shape != expected_shape:
+            raise ValueError(
+                f"Input signal shape {signal.shape} doesn't match "
+                f"forward model grid size {expected_shape}. "
+                f"Use a model trained with matching grid size."
+            )
+
     def _find_default_checkpoint(self) -> Path | None:
         """Find the default checkpoint from bundled locations."""
         root = Path(__file__).parent.parent.parent / "checkpoints_3d" / "attention_unet_3c"
@@ -214,7 +225,7 @@ class InferencePipeline3C:
             fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
 
             im0 = axes[0].imshow(signal, cmap="viridis", origin="lower")
-            axes[0].set_title("Input 64x64 DEXSY Signal (3C)")
+            axes[0].set_title(f"Input {self.forward_model.n_d}x{self.forward_model.n_b} DEXSY Signal (3C)")
             axes[0].set_xlabel("b2 index")
             axes[0].set_ylabel("b1 index")
             plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
@@ -230,7 +241,7 @@ class InferencePipeline3C:
             fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
 
             im0 = axes[0].imshow(signal, cmap="viridis", origin="lower")
-            axes[0].set_title("Input 64x64 DEXSY Signal (3C)")
+            axes[0].set_title(f"Input {self.forward_model.n_d}x{self.forward_model.n_b} DEXSY Signal (3C)")
             axes[0].set_xlabel("b2 index")
             axes[0].set_ylabel("b1 index")
             plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
@@ -259,10 +270,10 @@ class InferencePipeline3C:
         source_name: str | None = None,
     ) -> PredictionResult3C:
         """
-        Run inference on a single 64x64 DEXSY signal.
+        Run inference on a DEXSY signal.
 
         Args:
-            signal: Input signal array (64x64)
+            signal: Input signal array (grid_size x grid_size)
             true_spectrum: Optional ground truth for metrics computation
             include_figure: Whether to generate a visualization
             source_name: Optional source name
@@ -270,6 +281,9 @@ class InferencePipeline3C:
         Returns:
             PredictionResult3C with spectrum, DEI, metrics, and optional figure
         """
+        # Validate input shape
+        self._validate_input_shape(signal)
+
         # Validate and preprocess
         validated = validate_signal_grid(signal, self.forward_model)
         model_inputs = build_model_inputs(validated, self.forward_model)
@@ -307,10 +321,10 @@ class InferencePipeline3C:
         batch_size: int = 16,
     ) -> list[PredictionResult3C]:
         """
-        Run batch inference on multiple 64x64 DEXSY signals.
+        Run batch inference on multiple DEXSY signals.
 
         Args:
-            signals: Input signals array (N, 64, 64) or (N, 1, 64, 64)
+            signals: Input signals array (N, grid_size, grid_size) or (N, 1, grid_size, grid_size)
             true_spectra: Optional ground truths for metrics
             source_names: Optional source names for each signal
             include_figures: Whether to generate visualizations
@@ -319,6 +333,10 @@ class InferencePipeline3C:
         Returns:
             List of PredictionResult3C objects
         """
+        # Validate input shape using the first signal
+        if len(signals) > 0:
+            self._validate_input_shape(signals[0])
+
         validated = validate_signal_grid(signals, self.forward_model)
         model_inputs = build_model_inputs(validated, self.forward_model)
         predictions = self._predict_distribution(model_inputs, batch_size=batch_size)[:, 0]

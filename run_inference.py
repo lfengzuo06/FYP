@@ -16,6 +16,7 @@ if str(ROOT) not in sys.path:
 from improved_2d_dexsy import (  # noqa: E402
     DEXSYInferencePipeline,
     ForwardModel2D,
+    create_forward_model,
     InferenceConfig,
     available_models,
     create_run_output_dir,
@@ -33,7 +34,7 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run 2D DEXSY inverse-model inference on one sample, a directory, or synthetic data."
     )
     mode = parser.add_mutually_exclusive_group(required=True)
-    mode.add_argument("--input", type=str, help="Path to one 64x64 signal matrix (.npy, .npz, .csv, .txt).")
+    mode.add_argument("--input", type=str, help="Path to one signal matrix (.npy, .npz, .csv, .txt).")
     mode.add_argument("--input-dir", type=str, help="Directory containing many signal matrices.")
     mode.add_argument("--synthetic-count", type=int, help="Generate N synthetic samples and reconstruct them.")
 
@@ -80,6 +81,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=(0.005, 0.015),
         metavar=("LOW", "HIGH"),
         help="Synthetic generation noise range.",
+    )
+    parser.add_argument(
+        "--grid_size",
+        type=int,
+        default=None,
+        help="Grid size for inference (16 or 64). Uses checkpoint config if not specified.",
     )
     return parser
 
@@ -137,11 +144,15 @@ def main() -> int:
             f"Model '{config.model_name}' requires a checkpoint. "
             "Provide --checkpoint-path or train the model first."
         )
+
+    # Determine grid size for forward model
+    grid_size = args.grid_size
+
     pipeline = DEXSYInferencePipeline(
         model_name=config.model_name,
         checkpoint_path=config.resolved_checkpoint_path,
         device=config.resolved_device,
-        forward_model=ForwardModel2D(n_d=64, n_b=64),
+        grid_size=grid_size,
     )
 
     if args.input:
@@ -171,12 +182,16 @@ def main() -> int:
         if not signal_items:
             parser.error(f"No supported signal files found in {args.input_dir!r}.")
 
+        # Use forward model's grid size for zero padding
+        fm = pipeline.forward_model
+        zero_shape = (fm.n_d, fm.n_b)
+
         names = [name for name, _, _ in signal_items]
         signals = np.stack([signal for _, signal, _ in signal_items], axis=0)
         truth_dir = Path(args.true_spectra_dir) if args.true_spectra_dir else None
         truth_list = [_load_optional_ground_truth(name, truth_dir) for name in names]
         true_spectra = None if all(item is None for item in truth_list) else np.stack([
-            np.zeros((64, 64), dtype=np.float32) if item is None else np.asarray(item, dtype=np.float32)
+            np.zeros(zero_shape, dtype=np.float32) if item is None else np.asarray(item, dtype=np.float32)
             for item in truth_list
         ], axis=0)
 

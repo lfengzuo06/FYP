@@ -35,7 +35,7 @@ _root = Path(__file__).parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from dexsy_core.forward_model import ForwardModel2D
+from dexsy_core.forward_model import ForwardModel2D, create_forward_model
 from dexsy_core.preprocessing import build_model_inputs
 
 from .model import AttentionUNet3C, PhysicsInformedLoss3C
@@ -147,6 +147,8 @@ def train_model(
     seed: int = 42,
     device: str = None,
     checkpoint_path: str = None,
+    n_d: int = 64,
+    n_b: int = 64,
 ) -> tuple:
     """
     Train the Attention U-Net model on 3C data.
@@ -170,12 +172,14 @@ def train_model(
         seed: Random seed
         device: Device to use ('cuda', 'cpu', or None for auto)
         checkpoint_path: Optional path to load existing weights
+        n_d: Grid size for diffusion dimension
+        n_b: Grid size for b-value dimension
 
     Returns:
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / "attention_unet_3c"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / f"attention_unet_3c_g{n_d}"
     else:
         output_dir = Path(output_dir)
 
@@ -191,8 +195,8 @@ def train_model(
 
     set_seed(seed)
 
-    # Initialize forward model
-    forward_model = ForwardModel2D(n_d=64, n_b=64)
+    # Initialize forward model using factory function
+    forward_model = create_forward_model(n_d=n_d, n_b=n_b)
 
     # Generate datasets
     print(f"Generating 3C datasets (n_compartments={n_compartments})...")
@@ -390,6 +394,8 @@ def train_model(
         'config': {
             'base_filters': base_filters,
             'in_channels': datasets['train']['inputs'].shape[1],
+            'n_d': n_d,
+            'n_b': n_b,
             'n_compartments': n_compartments,
         }
     }, model_dir / "final_model.pt")
@@ -406,6 +412,8 @@ def train_model(
     # Save config
     config_path = model_dir / "config.txt"
     with open(config_path, 'w') as f:
+        f.write(f"n_d: {n_d}\n")
+        f.write(f"n_b: {n_b}\n")
         f.write(f"n_compartments: {n_compartments}\n")
         f.write(f"n_train: {n_train}\n")
         f.write(f"n_val: {n_val}\n")
@@ -439,7 +447,14 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--compartments', type=int, default=3, help='Number of compartments')
     parser.add_argument('--n_test', type=int, default=100, help='Number of test samples')
+    parser.add_argument('--n_d', type=int, default=64, help='Grid size for diffusion dimension')
+    parser.add_argument('--n_b', type=int, default=64, help='Grid size for b-value dimension')
+    parser.add_argument('--grid_size', type=int, default=64, help='Shorthand: set both n_d and n_b')
     args = parser.parse_args()
+
+    # Use grid_size shorthand if provided
+    n_d = args.grid_size if args.grid_size != 64 else args.n_d
+    n_b = args.grid_size if args.grid_size != 64 else args.n_b
 
     train_model(
         output_dir=args.output_dir,
@@ -452,6 +467,8 @@ def main():
         learning_rate=args.lr,
         n_compartments=args.compartments,
         seed=args.seed,
+        n_d=n_d,
+        n_b=n_b,
     )
 
 

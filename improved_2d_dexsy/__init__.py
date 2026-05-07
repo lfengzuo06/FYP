@@ -12,6 +12,8 @@ All implementations are delegated to their respective modules.
 from __future__ import annotations
 from pathlib import Path
 
+import torch
+
 # Import configuration helpers (these remain here as they're app-specific)
 from .config import (
     CHECKPOINTS_DIR,
@@ -35,6 +37,8 @@ from .config import (
 # Re-export from dexsy_core for backwards compatibility
 from dexsy_core import (
     ForwardModel2D,
+    create_forward_model,
+    GRID_PROFILES,
     compute_dei,
 )
 from dexsy_core.preprocessing import (
@@ -123,9 +127,10 @@ class DEXSYInferencePipeline:
                     'pinn_3c', 'deep_unfolding_3c', 'diffusion_refiner', '3d_ilt')
         checkpoint_path: Path to model checkpoint (not needed for ILT)
         device: Device to use ('cuda', 'cpu', or None for auto)
-        forward_model: ForwardModel2D instance
+        forward_model: ForwardModel2D instance (creates new if None)
         alpha: ILT regularization parameter (only for 2d_ilt/3d_ilt)
         model_type: Neural operator type ('deeponet' or 'fno', only for neural operators)
+        grid_size: Grid size for inference (16 or 64). Creates matching forward model if forward_model is None.
     """
 
     _MODEL_REGISTRY_2D = {
@@ -157,6 +162,7 @@ class DEXSYInferencePipeline:
         forward_model: ForwardModel2D | None = None,
         alpha: float = 0.02,
         model_type: str | None = None,  # For neural operators
+        grid_size: int | None = None,  # Grid size for inference
     ):
         if model_name not in self._MODEL_REGISTRY:
             raise ValueError(
@@ -164,6 +170,25 @@ class DEXSYInferencePipeline:
             )
 
         pipeline_class = self._MODEL_REGISTRY[model_name]
+
+        # Create forward model based on grid_size or checkpoint config
+        if forward_model is None and model_name not in ("2d_ilt", "3d_ilt"):
+            # Try to read grid_size from checkpoint if not explicitly provided
+            if grid_size is None and checkpoint_path is not None:
+                checkpoint_path_obj = Path(checkpoint_path) if checkpoint_path else None
+                if checkpoint_path_obj and checkpoint_path_obj.exists():
+                    try:
+                        checkpoint = torch.load(checkpoint_path_obj, map_location='cpu')
+                        config = checkpoint.get('config', {})
+                        grid_size = config.get('n_d') or config.get('grid_size')
+                    except Exception:
+                        pass  # Fall back to default
+
+            if grid_size is not None:
+                forward_model = create_forward_model(profile=grid_size)
+            else:
+                # Default to 64x64 for backward compatibility
+                forward_model = ForwardModel2D(n_d=64, n_b=64)
 
         # 3D ILT doesn't need checkpoint_path (but ILTInferencePipeline is 2D only)
         # For 3d_ilt, we'll need to check if there's a 3D ILT implementation
@@ -440,6 +465,8 @@ __all__ = [
     "resolve_repo_root",
     # Core (from dexsy_core)
     "ForwardModel2D",
+    "create_forward_model",
+    "GRID_PROFILES",
     "compute_dei",
     "build_model_inputs",
     "build_position_channel",
