@@ -28,7 +28,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
-from dexsy_core.forward_model import ForwardModel2D
+from dexsy_core.forward_model import ForwardModel2D, create_forward_model
 from dexsy_core.preprocessing import build_model_inputs
 
 from .model import PINN2D, PINNLoss
@@ -138,10 +138,12 @@ def train_model(
     seed: int = 42,
     device: str = None,
     checkpoint_path: str = None,
+    n_d: int = 64,
+    n_b: int = 64,
 ) -> tuple:
     """
     Train a PINN model on 2D DEXSY.
-    
+
     Args:
         output_dir: Directory for saving outputs
         n_train: Number of training samples
@@ -159,12 +161,14 @@ def train_model(
         seed: Random seed
         device: Device to use ('cuda', 'cpu', or None for auto)
         checkpoint_path: Optional path to load existing weights
-        
+        n_d: Grid size for diffusion dimension
+        n_b: Grid size for b-value dimension
+
     Returns:
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "checkpoints_2d" / "pinn"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_2d" / f"pinn_g{n_d}"
     else:
         output_dir = Path(output_dir)
 
@@ -184,7 +188,7 @@ def train_model(
     print(f"Learning rate: {learning_rate}, Weight decay: {weight_decay}")
 
     # Forward model
-    forward_model = ForwardModel2D(n_d=64, n_b=64)
+    forward_model = create_forward_model(n_d=n_d, n_b=n_b)
 
     # Generate datasets
     print(f"\nGenerating datasets...")
@@ -236,6 +240,9 @@ def train_model(
         'model_name': 'pinn',
         'architecture': 'simple_encoder_decoder_v2',
         'checkpoint_format_version': 2,
+        'n_d': n_d,
+        'n_b': n_b,
+        'n_compartments': n_compartments,
     }
 
     # Print model info

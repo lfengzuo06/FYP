@@ -19,7 +19,7 @@ from typing import Any
 import numpy as np
 import torch
 
-from dexsy_core.forward_model import ForwardModel2D, compute_dei
+from dexsy_core.forward_model import ForwardModel2D, create_forward_model, compute_dei
 from dexsy_core.preprocessing import validate_signal_grid, build_model_inputs
 
 from .model import DeepUnfolding2D
@@ -78,7 +78,6 @@ class InferencePipeline:
         else:
             self.device = device
 
-        self.forward_model = forward_model or ForwardModel2D(n_d=64, n_b=64)
         self.n_layers = n_layers
         self.hidden_dim = hidden_dim
 
@@ -100,12 +99,34 @@ class InferencePipeline:
                     f"Or provide a checkpoint_path explicitly."
                 )
 
+        # Derive grid size from checkpoint config if forward_model not provided
+        # Must happen AFTER _load_model since it populates model_metadata
+        if forward_model is None:
+            n_d = self.model_metadata.get('n_d', 64)
+            n_b = self.model_metadata.get('n_b', 64)
+            forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
+
+        self.forward_model = forward_model
+
+    def _validate_input_shape(self, signal: np.ndarray) -> None:
+        """Validate input signal shape matches the model's expected grid size."""
+        expected_shape = (self.forward_model.n_d, self.forward_model.n_b)
+        actual_shape = signal.shape[-2:]
+        if actual_shape != expected_shape:
+            raise ValueError(
+                f"Input signal shape {signal.shape} doesn't match "
+                f"forward model grid size {expected_shape}. "
+                f"Use a model trained with matching grid size."
+            )
+
     def _find_default_checkpoint(self) -> Path | None:
         """Find the default checkpoint from bundled locations."""
         root = Path(__file__).parent.parent.parent
         preferred_paths = [
             root / "checkpoints_2d" / self.DEFAULT_CHECKPOINT,
             root / "checkpoints_2d" / "deep_unfolding" / "best_model.pt",
+            root / "checkpoints_2d" / "deep_unfolding_g64" / "best_model.pt",
+            root / "checkpoints_2d" / "deep_unfolding_g16" / "best_model.pt",
         ]
         for p in preferred_paths:
             if p.exists():
@@ -125,17 +146,22 @@ class InferencePipeline:
         n_layers = config.get('n_layers', self.n_layers)
         hidden_dim = config.get('hidden_dim', self.hidden_dim)
         init_method = config.get('init_method', 'mlp')
+        n_d = config.get('n_d', 64)
+        n_b = config.get('n_b', 64)
+
+        # Create forward model for kernel matrix
+        forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
 
         # Create model
         self.model = DeepUnfolding2D(
             n_layers=n_layers,
-            n_d=self.forward_model.n_d,
+            n_d=n_d,
             hidden_dim=hidden_dim,
             init_method=init_method,
         ).to(self.device)
 
         # Set kernel matrix
-        K = self.forward_model.kernel_matrix.astype(np.float32)
+        K = forward_model.kernel_matrix.astype(np.float32)
         K_tensor = torch.from_numpy(K).float().to(self.device)
         self.model.set_kernel_matrix(K_tensor)
 
@@ -154,6 +180,8 @@ class InferencePipeline:
             'init_method': init_method,
             'epoch': config.get('epoch', 'unknown'),
             'val_loss': config.get('val_loss', 'unknown'),
+            'n_d': n_d,
+            'n_b': n_b,
         }
 
     def _validate_checkpoint_keys(
@@ -264,7 +292,7 @@ class InferencePipeline:
 
         # Input signal
         im0 = axes[0].imshow(signal, cmap="viridis", origin="lower")
-        axes[0].set_title("Input 64x64 DEXSY Signal")
+        axes[0].set_title(f"Input {self.forward_model.n_d}x{self.forward_model.n_b} DEXSY Signal")
         axes[0].set_xlabel("b2 index")
         axes[0].set_ylabel("b1 index")
         plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
@@ -298,10 +326,10 @@ class InferencePipeline:
         source_name: str | None = None,
     ) -> PredictionResult:
         """
-        Run inference on a single 64x64 DEXSY signal.
+        Run inference on a DEXSY signal.
 
         Args:
-            signal: Input signal array (64x64)
+            signal: Input signal array (grid_size x grid_size)
             true_spectrum: Optional ground truth for metrics computation
             include_figure: Whether to generate a visualization
             source_name: Optional source name
@@ -311,6 +339,9 @@ class InferencePipeline:
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Provide checkpoint_path.")
+
+        # Validate input shape
+        self._validate_input_shape(signal)
 
         # Validate and preprocess
         validated = validate_signal_grid(signal, self.forward_model)
@@ -349,10 +380,10 @@ class InferencePipeline:
         batch_size: int = 16,
     ) -> list[PredictionResult]:
         """
-        Run batch inference on multiple 64x64 DEXSY signals.
+        Run batch inference on multiple DEXSY signals.
 
         Args:
-            signals: Input signals array (N, 64, 64) or (N, 1, 64, 64)
+            signals: Input signals array (N, grid_size, grid_size) or (N, 1, grid_size, grid_size)
             true_spectra: Optional ground truths for metrics
             source_names: Optional source names for each signal
             include_figures: Whether to generate visualizations
@@ -363,6 +394,10 @@ class InferencePipeline:
         """
         if self.model is None:
             raise RuntimeError("Model not loaded. Provide checkpoint_path.")
+
+        # Validate input shape using the first signal
+        if len(signals) > 0:
+            self._validate_input_shape(signals[0])
 
         validated = validate_signal_grid(signals, self.forward_model)
         model_inputs = build_model_inputs(validated, self.forward_model)
@@ -423,7 +458,7 @@ def predict(
     High-level inference function for Deep Unfolding.
 
     Args:
-        signal: Input 64x64 DEXSY signal
+        signal: Input DEXSY signal (grid_size x grid_size)
         checkpoint_path: Optional checkpoint path
         device: Device to use
         forward_model: Optional ForwardModel2D instance

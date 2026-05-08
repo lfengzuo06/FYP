@@ -79,12 +79,10 @@ class InferencePipeline:
             device: Device to use ('cuda', 'cpu', or None for auto)
             forward_model: ForwardModel2D instance (creates new if None)
         """
-        self.forward_model = forward_model or ForwardModel2D(n_d=64, n_b=64)
-        
-        # Resolve checkpoint path
+        # Resolve checkpoint path first (needed to derive grid size)
         if checkpoint_path is None:
             checkpoint_path = self._find_default_checkpoint()
-        
+
         self.checkpoint_path = Path(checkpoint_path) if checkpoint_path else None
 
         # Device setup
@@ -92,8 +90,32 @@ class InferencePipeline:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(device)
 
+        # Derive grid size from checkpoint config if forward_model not provided
+        if forward_model is None:
+            if self.checkpoint_path is not None and self.checkpoint_path.exists():
+                checkpoint = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False)
+                config = checkpoint.get('config', {})
+                n_d = config.get('n_d', 64)
+                n_b = config.get('n_b', 64)
+                forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
+            else:
+                forward_model = ForwardModel2D(n_d=64, n_b=64)
+
+        self.forward_model = forward_model
+
         # Load model
         self.model, self.model_metadata = self._load_model()
+
+    def _validate_input_shape(self, signal: np.ndarray) -> None:
+        """Validate input signal shape matches the model's expected grid size."""
+        expected_shape = (self.forward_model.n_d, self.forward_model.n_b)
+        actual_shape = signal.shape[-2:]
+        if actual_shape != expected_shape:
+            raise ValueError(
+                f"Input signal shape {signal.shape} doesn't match "
+                f"forward model grid size {expected_shape}. "
+                f"Use a model trained with matching grid size."
+            )
 
     def _find_default_checkpoint(self) -> Path | None:
         """Find the default checkpoint from bundled locations."""
@@ -101,6 +123,8 @@ class InferencePipeline:
         preferred_paths = [
             root / "checkpoints_2d" / self.DEFAULT_CHECKPOINT,
             root / "checkpoints_2d" / "plain_unet" / "best_model.pt",
+            root / "checkpoints_2d" / "plain_unet_g64" / "best_model.pt",
+            root / "checkpoints_2d" / "plain_unet_g16" / "best_model.pt",
         ]
         for p in preferred_paths:
             if p.exists():
@@ -123,6 +147,7 @@ class InferencePipeline:
 
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
         state_dict = checkpoint.get('model_state_dict', checkpoint)
+        config = checkpoint.get('config', {})
 
         # Infer model config from state dict
         # Plain U-Net starts with enc1.conv1
@@ -149,6 +174,8 @@ class InferencePipeline:
             "model_name": self.MODEL_NAME,
             "epoch": checkpoint.get('epoch'),
             "val_loss": checkpoint.get('val_loss'),
+            "n_d": config.get('n_d', 64),
+            "n_b": config.get('n_b', 64),
         }
 
         return model, metadata
@@ -224,7 +251,7 @@ class InferencePipeline:
             fig, axes = plt.subplots(1, 2, figsize=(11, 4.5))
 
             im0 = axes[0].imshow(signal, cmap="viridis", origin="lower")
-            axes[0].set_title("Input 64x64 DEXSY Signal")
+            axes[0].set_title(f"Input {self.forward_model.n_d}x{self.forward_model.n_b} DEXSY Signal")
             axes[0].set_xlabel("b2 index")
             axes[0].set_ylabel("b1 index")
             plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
@@ -240,7 +267,7 @@ class InferencePipeline:
             fig, axes = plt.subplots(1, 3, figsize=(16, 4.5))
 
             im0 = axes[0].imshow(signal, cmap="viridis", origin="lower")
-            axes[0].set_title("Input 64x64 DEXSY Signal")
+            axes[0].set_title(f"Input {self.forward_model.n_d}x{self.forward_model.n_b} DEXSY Signal")
             axes[0].set_xlabel("b2 index")
             axes[0].set_ylabel("b1 index")
             plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
@@ -269,10 +296,10 @@ class InferencePipeline:
         source_name: str | None = None,
     ) -> PredictionResult:
         """
-        Run inference on a single 64x64 DEXSY signal.
+        Run inference on a DEXSY signal.
 
         Args:
-            signal: Input signal array (64x64)
+            signal: Input signal array (grid_size x grid_size)
             true_spectrum: Optional ground truth for metrics computation
             include_figure: Whether to generate a visualization
             source_name: Optional source name
@@ -280,6 +307,9 @@ class InferencePipeline:
         Returns:
             PredictionResult with spectrum, DEI, metrics, and optional figure
         """
+        # Validate input shape
+        self._validate_input_shape(signal)
+
         validated = validate_signal_grid(signal, self.forward_model)
         model_inputs = build_model_inputs(validated, self.forward_model)
 
@@ -313,10 +343,10 @@ class InferencePipeline:
         batch_size: int = 16,
     ) -> list[PredictionResult]:
         """
-        Run batch inference on multiple 64x64 DEXSY signals.
+        Run batch inference on multiple DEXSY signals.
 
         Args:
-            signals: Input signals array (N, 64, 64) or (N, 1, 64, 64)
+            signals: Input signals array (N, grid_size, grid_size) or (N, 1, grid_size, grid_size)
             true_spectra: Optional ground truths for metrics
             source_names: Optional source names for each signal
             include_figures: Whether to generate visualizations
@@ -325,6 +355,10 @@ class InferencePipeline:
         Returns:
             List of PredictionResult objects
         """
+        # Validate input shape using the first signal
+        if len(signals) > 0:
+            self._validate_input_shape(signals[0])
+
         validated = validate_signal_grid(signals, self.forward_model)
         model_inputs = build_model_inputs(validated, self.forward_model)
         predictions = self._predict_distribution(model_inputs, batch_size=batch_size)[:, 0]

@@ -30,7 +30,7 @@ import torch.nn.functional as F
 import torch.optim as optim
 from torch.utils.data import Dataset, DataLoader
 
-from dexsy_core.forward_model import ForwardModel2D, compute_dei
+from dexsy_core.forward_model import ForwardModel2D, create_forward_model, compute_dei
 
 from .model import DeepUnfolding2D
 
@@ -240,6 +240,8 @@ def train_model(
     seed: int = 42,
     device: str = None,
     checkpoint_path: str = None,
+    n_d: int = 64,
+    n_b: int = 64,
 ) -> tuple:
     """
     Train the Deep Unfolding model.
@@ -272,12 +274,14 @@ def train_model(
         seed: Random seed
         device: Device to use ('cuda', 'cpu', or None for auto)
         checkpoint_path: Optional path to load existing weights
+        n_d: Grid size for diffusion dimension
+        n_b: Grid size for b-value dimension
 
     Returns:
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "checkpoints_2d" / "deep_unfolding"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_2d" / f"deep_unfolding_g{n_d}"
     else:
         output_dir = Path(output_dir)
 
@@ -304,7 +308,7 @@ def train_model(
     )
 
     # Forward model and kernel matrix
-    forward_model = ForwardModel2D(n_d=64, n_b=64)
+    forward_model = create_forward_model(n_d=n_d, n_b=n_b)
     K = forward_model.kernel_matrix.astype(np.float32)
     K_tensor = torch.from_numpy(K).float().to(device)
 
@@ -347,7 +351,7 @@ def train_model(
     # Model
     model = DeepUnfolding2D(
         n_layers=n_layers,
-        n_d=64,
+        n_d=n_d,
         hidden_dim=hidden_dim,
         use_denoiser=use_denoiser,
         init_method=init_method,
@@ -514,6 +518,9 @@ def train_model(
                     'hidden_dim': hidden_dim,
                     'use_denoiser': use_denoiser,
                     'init_method': init_method,
+                    'n_d': n_d,
+                    'n_b': n_b,
+                    'n_compartments': n_compartments,
                 }
             }, output_dir / f"checkpoint_epoch_{epoch+1}.pt")
 
@@ -531,6 +538,9 @@ def train_model(
             'init_method': init_method,
             'epoch': epochs,
             'val_loss': best_val_loss,
+            'n_d': n_d,
+            'n_b': n_b,
+            'n_compartments': n_compartments,
         }
     }, output_dir / "best_model.pt")
     print(f"\nBest model saved to {output_dir / 'best_model.pt'}")
