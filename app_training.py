@@ -33,7 +33,7 @@ import torch
 
 from dexsy_core.forward_model import create_forward_model, ForwardModel2D
 from dexsy_core.preprocessing import build_model_inputs
-from dexsy_core.metrics import compute_metrics_dict
+from dexsy_core.metrics import compute_batch_metrics
 from improved_2d_dexsy import (
     OTHER_MODELS_DIR,
     CHECKPOINTS_DIR,
@@ -654,11 +654,19 @@ def run_benchmark(
             pred = trained_model(inp_tensor)
             trained_preds.append(pred.cpu().numpy()[0, 0].astype(np.float32))
     
-    # Compute metrics for trained model
-    trained_metrics = compute_metrics_dict(
+    # Compute aggregate metrics over the benchmark batch
+    trained_batch_metrics = compute_batch_metrics(
         np.array(ground_truths),
         np.array(trained_preds),
     )
+    trained_metrics = {
+        "mse": trained_batch_metrics["aggregate"]["mse_mean"],
+        "mae": trained_batch_metrics["aggregate"]["mae_mean"],
+        "dei_error": trained_batch_metrics["aggregate"]["dei_error_mean"],
+        "mse_std": trained_batch_metrics["aggregate"]["mse_std"],
+        "mae_std": trained_batch_metrics["aggregate"]["mae_std"],
+        "dei_error_std": trained_batch_metrics["aggregate"]["dei_error_std"],
+    }
     
     results = {f"Trained ({model_type})": trained_metrics}
     
@@ -676,8 +684,15 @@ def run_benchmark(
                     pred = pred.cpu().numpy()
                 preds.append(pred)
         
-        metrics = compute_metrics_dict(np.array(ground_truths), np.array(preds))
-        results[name] = metrics
+        batch_metrics = compute_batch_metrics(np.array(ground_truths), np.array(preds))
+        results[name] = {
+            "mse": batch_metrics["aggregate"]["mse_mean"],
+            "mae": batch_metrics["aggregate"]["mae_mean"],
+            "dei_error": batch_metrics["aggregate"]["dei_error_mean"],
+            "mse_std": batch_metrics["aggregate"]["mse_std"],
+            "mae_std": batch_metrics["aggregate"]["mae_std"],
+            "dei_error_std": batch_metrics["aggregate"]["dei_error_std"],
+        }
     
     return results
 
