@@ -675,24 +675,28 @@ def run_benchmark(
     
     for name, pipeline in baseline_models.items():
         preds = []
-        with torch.no_grad():
-            for sig in signals:
-                result = pipeline.predict(sig)
-                # Extract spectrum from result object
-                pred = getattr(result, 'reconstructed_spectrum', result)
-                if hasattr(pred, 'numpy'):
-                    pred = pred.cpu().numpy()
-                preds.append(pred)
-        
-        batch_metrics = compute_batch_metrics(np.array(ground_truths), np.array(preds))
-        results[name] = {
-            "mse": batch_metrics["aggregate"]["mse_mean"],
-            "mae": batch_metrics["aggregate"]["mae_mean"],
-            "dei_error": batch_metrics["aggregate"]["dei_error_mean"],
-            "mse_std": batch_metrics["aggregate"]["mse_std"],
-            "mae_std": batch_metrics["aggregate"]["mae_std"],
-            "dei_error_std": batch_metrics["aggregate"]["dei_error_std"],
-        }
+        try:
+            with torch.no_grad():
+                for sig in signals:
+                    result = pipeline.predict(sig)
+                    # Extract spectrum from result object
+                    pred = getattr(result, 'reconstructed_spectrum', result)
+                    if hasattr(pred, 'numpy'):
+                        pred = pred.cpu().numpy()
+                    preds.append(pred)
+
+            batch_metrics = compute_batch_metrics(np.array(ground_truths), np.array(preds))
+            results[name] = {
+                "mse": batch_metrics["aggregate"]["mse_mean"],
+                "mae": batch_metrics["aggregate"]["mae_mean"],
+                "dei_error": batch_metrics["aggregate"]["dei_error_mean"],
+                "mse_std": batch_metrics["aggregate"]["mse_std"],
+                "mae_std": batch_metrics["aggregate"]["mae_std"],
+                "dei_error_std": batch_metrics["aggregate"]["dei_error_std"],
+            }
+        except Exception as exc:
+            print(f"[benchmark] Skip baseline '{name}': {exc}")
+            continue
     
     return results
 
@@ -708,34 +712,83 @@ def _get_baseline_models_for_grid(
     # Map to 2C/3C model names
     if n_compartments == 3:
         model_suffix = "_3c"
-        is_3c = True
     else:
         model_suffix = ""
-        is_3c = False
     
     # Base model names for each architecture type
-    base_model_names = [
-        "attention_unet", "plain_unet", "deep_unfolding", "fno",
-    ]
-    
-    # Add g16 suffix for 16x16 grid
-    if grid_size == 16:
-        all_baseline_names = [name + "_g16" for name in base_model_names]
-    else:
-        all_baseline_names = base_model_names
-    
-    # Include PINN if available (only 64x64)
+    base_model_names = ["attention_unet", "plain_unet", "deep_unfolding", "fno"]
+
+    # Include PINN baseline only for 64x64
     if grid_size == 64:
-        all_baseline_names.append("pinn")
-    
-    for name in all_baseline_names:
-        full_name = name + model_suffix
+        base_model_names.append("pinn")
+
+    checkpoint_pool = (
+        list_available_checkpoints_3d() if n_compartments == 3 else list_available_checkpoints()
+    )
+
+    def _checkpoint_grid(path: Path) -> int | None:
         try:
-            # Try to load the baseline model
-            pipeline = DEXSYInferencePipeline(model_name=full_name)
-            models[full_name] = pipeline
+            ckpt = torch.load(path, map_location="cpu")
+            cfg = ckpt.get("config", {})
+            n_d = cfg.get("n_d") or cfg.get("grid_size")
+            if n_d is not None:
+                return int(n_d)
         except Exception:
             pass
+        return None
+
+    def _pick_checkpoint(model_name: str) -> Path | None:
+        target = model_name.lower()
+        candidates = []
+        for path in checkpoint_pool:
+            s = str(path).lower()
+            if target not in s:
+                continue
+            g = _checkpoint_grid(path)
+            if g is not None and g != grid_size:
+                continue
+            # For legacy checkpoints without config, use filename hint as fallback.
+            if g is None and grid_size == 16 and "g16" not in s:
+                continue
+            candidates.append(path)
+        if not candidates:
+            return None
+        return sorted(candidates, key=lambda p: p.stat().st_mtime)[-1]
+
+    # Always pass an explicit forward model to avoid accidental 64x64 defaults
+    # in environments where pipeline grid auto-detection may differ.
+    fm = create_forward_model(n_d=grid_size, n_b=grid_size)
+
+    for base_name in base_model_names:
+        canonical_name = base_name + model_suffix
+        # Prefer explicit g16 registry names for 16x16 checkpoints.
+        if grid_size == 16:
+            full_name = f"{canonical_name}_g16"
+        else:
+            full_name = canonical_name
+        try:
+            checkpoint_path = _pick_checkpoint(canonical_name)
+            if checkpoint_path is None:
+                continue
+            pipeline = DEXSYInferencePipeline(
+                model_name=full_name,
+                checkpoint_path=str(checkpoint_path),
+                forward_model=fm,
+                grid_size=grid_size,
+            )
+            models[full_name] = pipeline
+        except Exception:
+            # Fallback to canonical name if _g16 alias is unavailable in registry.
+            try:
+                pipeline = DEXSYInferencePipeline(
+                    model_name=canonical_name,
+                    checkpoint_path=str(checkpoint_path),
+                    forward_model=fm,
+                    grid_size=grid_size,
+                )
+                models[canonical_name] = pipeline
+            except Exception:
+                pass
     
     return models
 
