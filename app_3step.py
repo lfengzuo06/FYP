@@ -53,15 +53,23 @@ MODEL_GRID_SUPPORT = {
     "deeponet": [64],
     "pinn_3c": [64],
     "attention_unet": [16, 64],
+    "attention_unet_g16": [16],
     "plain_unet": [16, 64],
+    "plain_unet_g16": [16],
     "deep_unfolding": [16, 64],
+    "deep_unfolding_g16": [16],
     "fno": [16, 64],
     "attention_unet_3c": [16, 64],
+    "attention_unet_3c_g16": [16],
     "plain_unet_3c": [16, 64],
+    "plain_unet_3c_g16": [16],
     "deep_unfolding_3c": [16, 64],
+    "deep_unfolding_3c_g16": [16],
     "2d_ilt": [16, 64],
     "3d_ilt": [16, 64],
     "diffusion_refiner": [64],
+    "pinn_g16": [16],
+    "pinn_3c_g16": [16],
 }
 
 # Visualization style constants (paper-like, bright and comparable)
@@ -156,15 +164,23 @@ def _get_model_filtered_checkpoints(model_name: str) -> list[str]:
     # Build prefix based on model type
     model_prefix_map = {
         "attention_unet": "attention_unet/",
+        "attention_unet_g16": "attention_unet_g16/",
         "plain_unet": "plain_unet/",
+        "plain_unet_g16": "plain_unet_g16_2c/",
         "pinn": "pinn" if is_3c else "pinn/",
+        "pinn_g16": "pinn_g16_2c/",
         "deep_unfolding": "deep_unfolding" if is_3c else "deep_unfolding/",
+        "deep_unfolding_g16": "deep_unfolding_g16_2c/" if not is_3c else "deep_unfolding_3c_g16/",
         "deeponet": "deeponet/",
         "fno": "fno/",
         "attention_unet_3c": "attention_unet_3c/",
+        "attention_unet_3c_g16": "attention_unet_3c_g16/",
         "plain_unet_3c": "plain_unet_3c/",
+        "plain_unet_3c_g16": "plain_unet_3c_g16/",
         "pinn_3c": "pinn_3c/",
+        "pinn_3c_g16": "pinn_3c_g16/",
         "deep_unfolding_3c": "deep_unfolding_3c/",
+        "deep_unfolding_3c_g16": "deep_unfolding_3c_g16/",
         "diffusion_refiner": "diffusion_refiner/",
     }
     model_prefix = model_prefix_map.get(model_name, f"{model_name}/")
@@ -172,7 +188,7 @@ def _get_model_filtered_checkpoints(model_name: str) -> list[str]:
     filtered = [c for c in choices if c.startswith(model_prefix)]
     if not filtered:
         # Fallback: try without folder prefix
-        filtered = [c for c in choices if model_name.replace("_3c", "") in c.lower()]
+        filtered = [c for c in choices if model_name.replace("_3c", "").replace("_g16", "") in c.lower()]
     return filtered
 
 
@@ -456,6 +472,7 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
     signal = result.signal
     ground_truth = result.ground_truth
     params = result.params
+    grid_size = result.grid_size
 
     fig, axes = plt.subplots(1, 3, figsize=(13, 3.5))
 
@@ -475,8 +492,13 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
     plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
     # Ground Truth (brighter linear display)
+    # For 16x16, don't apply smoothing; for 64x64, apply smoothing
     if ground_truth is not None:
-        gt_display = _smooth_spectrum_for_display(ground_truth)
+        if grid_size == 16:
+            # No smoothing for 16x16
+            gt_display = ground_truth
+        else:
+            gt_display = _smooth_spectrum_for_display(ground_truth)
         vmin, vmax = _shared_linear_display_range(gt_display)
         im2 = axes[2].imshow(
             gt_display,
@@ -1071,11 +1093,17 @@ def build_app():
                     "attention_unet_3c", "plain_unet_3c", "pinn_3c",
                     "deep_unfolding_3c", "diffusion_refiner", "3d_ilt"
                 ]
+                # Add g16 models for 3C
+                if grid_sz == 16:
+                    base_models += ["attention_unet_3c_g16", "plain_unet_3c_g16", "pinn_3c_g16", "deep_unfolding_3c_g16"]
             else:
                 base_models = [
                     "attention_unet", "plain_unet", "pinn",
                     "deep_unfolding", "deeponet", "fno", "2d_ilt"
                 ]
+                # Add g16 models for 2C
+                if grid_sz == 16:
+                    base_models += ["attention_unet_g16", "plain_unet_g16", "pinn_g16", "deep_unfolding_g16"]
             
             base_models = [m for m in base_models if grid_sz in MODEL_GRID_SUPPORT.get(m, [64])]
             

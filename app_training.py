@@ -698,10 +698,16 @@ def _get_baseline_models_for_grid(
         model_suffix = ""
         is_3c = False
     
-    # ALL available model names for the given compartments
-    all_baseline_names = [
+    # Base model names for each architecture type
+    base_model_names = [
         "attention_unet", "plain_unet", "deep_unfolding", "fno",
     ]
+    
+    # Add g16 suffix for 16x16 grid
+    if grid_size == 16:
+        all_baseline_names = [name + "_g16" for name in base_model_names]
+    else:
+        all_baseline_names = base_model_names
     
     # Include PINN if available (only 64x64)
     if grid_size == 64:
@@ -845,9 +851,9 @@ def build_app():
                 
                 progress_bar = gr.Slider(
                     minimum=0,
-                    maximum=1,
+                    maximum=100,
                     value=0,
-                    label="Progress",
+                    label="Progress (%)",
                     interactive=False,
                 )
                 
@@ -904,12 +910,14 @@ def build_app():
                     None, None, None, None, None
                 )
             
-            def progress_callback(pct, message):
-                pass  # Gradio doesn't support callbacks directly
-            
             try:
-                # Run training
-                result = run_training(
+                # Run training with progress callback
+                result = {}
+                def progress_callback(pct, message):
+                    result['progress'] = int(pct * 100)
+                    result['message'] = message
+                
+                training_result = run_training(
                     model_type=model_type,
                     grid_size=grid_size,
                     n_compartments=n_compartments,
@@ -920,34 +928,35 @@ def build_app():
                     batch_size=batch_size,
                     learning_rate=learning_rate,
                     early_stopping_patience=early_stopping_patience,
+                    progress_callback=progress_callback,
                 )
                 
                 # Generate plots
-                fig_curves = _plot_training_curves(result['history'])
+                fig_curves = _plot_training_curves(training_result['history'])
                 
                 fig_samples = _plot_sample_predictions(
-                    [np.array(s) for s in result['test_signals']],
-                    [np.array(gt) for gt in result['test_ground_truths']],
-                    [np.array(p) for p in result['predictions']],
+                    [np.array(s) for s in training_result['test_signals']],
+                    [np.array(gt) for gt in training_result['test_ground_truths']],
+                    [np.array(p) for p in training_result['predictions']],
                 )
                 
                 metrics_info = {
-                    'model_type': result['config']['model_type'],
-                    'grid_size': result['config']['grid_size'],
-                    'n_compartments': result['config']['n_compartments'],
-                    'best_val_loss': result['best_val_loss'],
-                    'total_epochs': len(result['history']['train_loss']),
-                    'checkpoint_path': result['checkpoint_path'],
+                    'model_type': training_result['config']['model_type'],
+                    'grid_size': training_result['config']['grid_size'],
+                    'n_compartments': training_result['config']['n_compartments'],
+                    'best_val_loss': training_result['best_val_loss'],
+                    'total_epochs': len(training_result['history']['train_loss']),
+                    'checkpoint_path': training_result['checkpoint_path'],
                 }
                 
                 return (
-                    1.0,
-                    f"Training complete! Best val loss: {result['best_val_loss']:.6f}",
+                    100,
+                    f"Training complete! Best val loss: {training_result['best_val_loss']:.6f}",
                     fig_curves,
                     fig_samples,
                     metrics_info,
-                    result['checkpoint_path'],
-                    result,
+                    training_result['checkpoint_path'],
+                    training_result,
                 )
                 
             except Exception as e:
@@ -972,19 +981,30 @@ def build_app():
             ],
         )
         
-        def run_benchmark_wrapper(state_dict, n_samples):
+        def run_benchmark_wrapper(state_dict, last_ckpt, n_samples):
             """Run benchmark comparison."""
-            if state_dict is None:
+            if state_dict is None and last_ckpt is None:
                 return None, None, "No trained model available. Train a model first."
             
-            config = state_dict.get('config', {})
+            # Use state_dict config if available, otherwise use last_checkpoint path
+            if state_dict is not None:
+                config = state_dict.get('config', {})
+                checkpoint_path = state_dict.get('checkpoint_path')
+                model_type = config.get('model_type', 'attention_unet')
+                grid_size = config.get('grid_size', 64)
+                n_compartments = config.get('n_compartments', 2)
+            else:
+                checkpoint_path = last_ckpt
+                model_type = 'attention_unet'
+                grid_size = 64
+                n_compartments = 2
             
             try:
                 results = run_benchmark(
-                    trained_checkpoint=state_dict['checkpoint_path'],
-                    model_type=config.get('model_type', 'attention_unet'),
-                    grid_size=config.get('grid_size', 64),
-                    n_compartments=config.get('n_compartments', 2),
+                    trained_checkpoint=checkpoint_path,
+                    model_type=model_type,
+                    grid_size=grid_size,
+                    n_compartments=n_compartments,
                     n_test_samples=int(n_samples),
                 )
                 
@@ -999,7 +1019,7 @@ def build_app():
         
         benchmark_btn.click(
             fn=run_benchmark_wrapper,
-            inputs=[training_state, gr.Number(value=100, label="Test Samples")],
+            inputs=[training_state, last_checkpoint, gr.Number(value=100, label="Test Samples")],
             outputs=[benchmark_plot, benchmark_table, benchmark_status],
         )
         
@@ -1007,7 +1027,7 @@ def build_app():
             """Clear training state and outputs."""
             return (
                 0, "Training not started...",
-                None, None, None, None, None
+                None, None, None, None, None, None
             )
         
         clear_btn.click(

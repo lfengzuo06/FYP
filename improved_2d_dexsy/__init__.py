@@ -140,9 +140,13 @@ class DEXSYInferencePipeline:
 
     _MODEL_REGISTRY_2D = {
         "attention_unet": AttentionInferencePipeline,
+        "attention_unet_g16": AttentionInferencePipeline,
         "plain_unet": PlainInferencePipeline,
+        "plain_unet_g16": PlainInferencePipeline,
         "pinn": PINNInferencePipeline,
+        "pinn_g16": PINNInferencePipeline,
         "deep_unfolding": DeepUnfoldingInferencePipeline,
+        "deep_unfolding_g16": DeepUnfoldingInferencePipeline,
         "deeponet": NeuralOpInferencePipeline,
         "fno": NeuralOpInferencePipeline,
         "2d_ilt": ILTInferencePipeline,
@@ -150,9 +154,13 @@ class DEXSYInferencePipeline:
 
     _MODEL_REGISTRY_3D = {
         "attention_unet_3c": AttentionInferencePipeline3D,
+        "attention_unet_3c_g16": AttentionInferencePipeline3D,
         "plain_unet_3c": PlainInferencePipeline3D,
+        "plain_unet_3c_g16": PlainInferencePipeline3D,
         "pinn_3c": PINNInferencePipeline3D,
+        "pinn_3c_g16": PINNInferencePipeline3D,
         "deep_unfolding_3c": DeepUnfoldingInferencePipeline3D,
+        "deep_unfolding_3c_g16": DeepUnfoldingInferencePipeline3D,
         "diffusion_refiner": DiffusionRefinerPipeline,
         "3d_ilt": None,  # Will be handled separately
     }

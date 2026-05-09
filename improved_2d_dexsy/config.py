@@ -30,25 +30,37 @@ MODEL_GRID_SUPPORT = {
     "pinn_3c": [64],
     # Both sizes supported
     "attention_unet": [16, 64],
+    "attention_unet_g16": [16],
     "plain_unet": [16, 64],
+    "plain_unet_g16": [16],
     "deep_unfolding": [16, 64],
+    "deep_unfolding_g16": [16],
     "fno": [16, 64],
     "attention_unet_3c": [16, 64],
+    "attention_unet_3c_g16": [16],
     "plain_unet_3c": [16, 64],
+    "plain_unet_3c_g16": [16],
     "deep_unfolding_3c": [16, 64],
+    "deep_unfolding_3c_g16": [16],
     # No checkpoint needed
     "2d_ilt": [16, 64],
     "3d_ilt": [16, 64],
     # Special models
     "diffusion_refiner": [64],
+    "pinn_g16": [16],
+    "pinn_3c_g16": [16],
 }
 
 # 2C models (using checkpoints_2d)
 DEFAULT_CHECKPOINTS = {
     "attention_unet": "attention_unet/attention_unet_best_model.pt",
+    "attention_unet_g16": "attention_unet_g16/checkpoints_20260507_203149/best_model.pt",
     "plain_unet": "plain_unet/best_model.pt",
+    "plain_unet_g16": "plain_unet_g16_2c/checkpoints_20260508_172800/best_model.pt",
     "pinn": "pinn_run_20260422/checkpoints/pinn_20260422_220103.pt",
+    "pinn_g16": "pinn_g16_2c/checkpoints/pinn_20260508_172729.pt",
     "deep_unfolding": "deep_unfolding/best_model.pt",
+    "deep_unfolding_g16": "deep_unfolding_g16_2c/best_model.pt",
     "deeponet": "deeponet/best_model.pt",
     "fno": "fno/best_model.pt",
     "2d_ilt": None,  # ILT doesn't require a checkpoint
@@ -56,11 +68,15 @@ DEFAULT_CHECKPOINTS = {
 
 # 3C models (using checkpoints_3d)
 DEFAULT_CHECKPOINTS_3D = {
-    "attention_unet_3c": "attention_unet_3c",
-    "plain_unet_3c": "plain_unet_3c",
-    "pinn_3c": "pinn_3c",
-    "deep_unfolding_3c": "deep_unfolding_3c",
-    "diffusion_refiner": "diffusion_refiner",
+    "attention_unet_3c": "attention_unet_3c/checkpoints_20260428_164228/best_model.pt",
+    "attention_unet_3c_g16": "attention_unet_3c_g16/checkpoints_20260507_205915/best_model.pt",
+    "plain_unet_3c": "plain_unet_3c/checkpoints_20260430_203333/best_model.pt",
+    "plain_unet_3c_g16": "plain_unet_3c_g16/checkpoints_20260509_071946/best_model.pt",
+    "pinn_3c": "pinn_3c/checkpoints_20260502_095025/best_model.pt",
+    "pinn_3c_g16": "pinn_3c_g16/checkpoints_20260509_071819/best_model.pt",
+    "deep_unfolding_3c": "deep_unfolding_3c/checkpoints_20260501_121714/best_model.pt",
+    "deep_unfolding_3c_g16": "deep_unfolding_3c_g16/checkpoints_20260509_075729/best_model.pt",
+    "diffusion_refiner": "diffusion_refiner/checkpoints_20260430_161942/best_model.pt",
     "3d_ilt": None,  # ILT doesn't require a checkpoint
 }
 
@@ -70,6 +86,9 @@ ALL_MODELS = {**DEFAULT_CHECKPOINTS, **DEFAULT_CHECKPOINTS_3D}
 
 def is_3c_model(model_name: str) -> bool:
     """Check if a model is a 3C model."""
+    # Handle g16 suffix
+    base_name = model_name.replace("_g16", "")
+    
     if model_name.startswith("other_"):
         # Check from other_models directory
         custom_model_name = model_name[len("other_"):]
@@ -83,7 +102,7 @@ def is_3c_model(model_name: str) -> bool:
             except Exception:
                 pass
         return False
-    return model_name in DEFAULT_CHECKPOINTS_3D
+    return base_name in DEFAULT_CHECKPOINTS_3D
 
 
 def available_models(include_3c: bool = True, include_other: bool = True) -> list[str]:
