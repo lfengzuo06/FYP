@@ -23,11 +23,16 @@ from .config import (
     DEFAULT_MODEL_NAME,
     DEFAULT_OUTPUT_ROOT,
     InferenceConfig,
+    MODEL_GRID_SUPPORT,
     available_models,
     create_run_output_dir,
+    get_model_grid_support,
     is_3c_model,
     list_available_checkpoints,
     list_available_checkpoints_3d,
+    list_other_models,
+    list_other_models_by_name,
+    OTHER_MODELS_DIR,
     resolve_checkpoint_path,
     resolve_device,
     resolve_output_root,
@@ -164,6 +169,26 @@ class DEXSYInferencePipeline:
         model_type: str | None = None,  # For neural operators
         grid_size: int | None = None,  # Grid size for inference
     ):
+        # Handle custom "other" models
+        if model_name.startswith("other_"):
+            # Custom trained model from OTHER_MODELS_DIR
+            custom_model_name = model_name[len("other_"):]
+            other_checkpoint = OTHER_MODELS_DIR / custom_model_name / "best_model.pt"
+            
+            if other_checkpoint.exists():
+                checkpoint_path = str(other_checkpoint)
+                # Try to determine actual model type from checkpoint
+                try:
+                    ckpt = torch.load(other_checkpoint, map_location='cpu')
+                    config = ckpt.get('config', {})
+                    actual_model_type = config.get('model_type', 'attention_unet')
+                    grid_size = config.get('grid_size', grid_size)
+                    model_name = actual_model_type  # Use actual model type
+                except Exception:
+                    actual_model_type = 'attention_unet'
+            else:
+                raise ValueError(f"Custom model '{custom_model_name}' not found at {other_checkpoint}")
+
         if model_name not in self._MODEL_REGISTRY:
             raise ValueError(
                 f"Unknown model '{model_name}'. Available models: {list(self._MODEL_REGISTRY.keys())}"
@@ -401,6 +426,14 @@ def resolve_checkpoint_path(
         if not path.is_absolute():
             path = (resolve_repo_root() / path).resolve()
         return path
+
+    # Handle other_models (custom trained models)
+    if model_name.startswith("other_"):
+        custom_model_name = model_name[len("other_"):]
+        other_checkpoint = OTHER_MODELS_DIR / custom_model_name / "best_model.pt"
+        if other_checkpoint.exists():
+            return other_checkpoint
+        return None
 
     # ILT doesn't need checkpoint
     if model_name in ("2d_ilt", "3d_ilt"):

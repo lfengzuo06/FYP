@@ -17,8 +17,31 @@ def resolve_repo_root() -> Path:
 REPO_ROOT = resolve_repo_root()
 CHECKPOINTS_DIR = REPO_ROOT / "checkpoints_2d"
 CHECKPOINTS_DIR_3D = REPO_ROOT / "checkpoints_3d"
+OTHER_MODELS_DIR = REPO_ROOT / "checkpoints_other"  # User-trained models
 DEFAULT_OUTPUT_ROOT = REPO_ROOT / "outputs" / "inference"
 DEFAULT_MODEL_NAME = "attention_unet"
+
+# Grid size support for each model
+# 64: supports 64x64, 16: supports 16x16, [16, 64]: supports both
+MODEL_GRID_SUPPORT = {
+    # 64x64 only models
+    "pinn": [64],
+    "deeponet": [64],
+    "pinn_3c": [64],
+    # Both sizes supported
+    "attention_unet": [16, 64],
+    "plain_unet": [16, 64],
+    "deep_unfolding": [16, 64],
+    "fno": [16, 64],
+    "attention_unet_3c": [16, 64],
+    "plain_unet_3c": [16, 64],
+    "deep_unfolding_3c": [16, 64],
+    # No checkpoint needed
+    "2d_ilt": [16, 64],
+    "3d_ilt": [16, 64],
+    # Special models
+    "diffusion_refiner": [64],
+}
 
 # 2C models (using checkpoints_2d)
 DEFAULT_CHECKPOINTS = {
@@ -47,12 +70,45 @@ ALL_MODELS = {**DEFAULT_CHECKPOINTS, **DEFAULT_CHECKPOINTS_3D}
 
 def is_3c_model(model_name: str) -> bool:
     """Check if a model is a 3C model."""
+    if model_name.startswith("other_"):
+        # Check from other_models directory
+        custom_model_name = model_name[len("other_"):]
+        other_checkpoint = OTHER_MODELS_DIR / custom_model_name / "best_model.pt"
+        if other_checkpoint.exists():
+            try:
+                import torch
+                ckpt = torch.load(other_checkpoint, map_location='cpu')
+                config = ckpt.get('config', {})
+                return config.get('n_compartments', 2) == 3
+            except Exception:
+                pass
+        return False
     return model_name in DEFAULT_CHECKPOINTS_3D
 
 
-def available_models(include_3c: bool = True) -> list[str]:
+def available_models(include_3c: bool = True, include_other: bool = True) -> list[str]:
     """Return supported model names."""
     models = list(ALL_MODELS.keys()) if include_3c else list(DEFAULT_CHECKPOINTS.keys())
+    
+    # Add other_models if they exist
+    if include_other:
+        other_models = list_other_models_by_name()
+        for model_dir in other_models.keys():
+            other_name = f"other_{model_dir}"
+            if other_name not in models:
+                # Check n_compartments and add to appropriate list
+                try:
+                    import torch
+                    checkpoint_path = OTHER_MODELS_DIR / model_dir / "best_model.pt"
+                    ckpt = torch.load(checkpoint_path, map_location='cpu')
+                    config = ckpt.get('config', {})
+                    n_comp = config.get('n_compartments', 2)
+                    if n_comp == 3 and not include_3c:
+                        continue
+                except Exception:
+                    pass
+                models.append(other_name)
+    
     return sorted(models)
 
 
@@ -81,6 +137,14 @@ def resolve_checkpoint_path(
         if not path.is_absolute():
             path = (REPO_ROOT / path).resolve()
         return path
+
+    # Handle other_models
+    if model_name.startswith("other_"):
+        custom_model_name = model_name[len("other_"):]
+        other_checkpoint = OTHER_MODELS_DIR / custom_model_name / "best_model.pt"
+        if other_checkpoint.exists():
+            return other_checkpoint
+        return None
 
     # ILT doesn't need a checkpoint
     if model_name in ("2d_ilt", "3d_ilt"):
@@ -167,3 +231,29 @@ class InferenceConfig:
     @property
     def resolved_device(self) -> torch.device:
         return resolve_device(self.device)
+
+
+def get_model_grid_support(model_name: str) -> list[int]:
+    """Get supported grid sizes for a model."""
+    return MODEL_GRID_SUPPORT.get(model_name, [64])
+
+
+def list_other_models() -> list[Path]:
+    """List user-trained model checkpoints from other_models directory."""
+    if not OTHER_MODELS_DIR.exists():
+        return []
+    return sorted(path for path in OTHER_MODELS_DIR.rglob("best_model.pt") if path.is_file())
+
+
+def list_other_models_by_name() -> dict[str, list[str]]:
+    """List other models grouped by model directory name."""
+    if not OTHER_MODELS_DIR.exists():
+        return {}
+    result = {}
+    for path in OTHER_MODELS_DIR.rglob("best_model.pt"):
+        model_dir = path.parent.name
+        rel_path = str(path.relative_to(OTHER_MODELS_DIR))
+        if model_dir not in result:
+            result[model_dir] = []
+        result[model_dir].append(rel_path)
+    return result

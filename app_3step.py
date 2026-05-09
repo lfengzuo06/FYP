@@ -33,15 +33,36 @@ from improved_2d_dexsy import (
     available_models,
     create_output_archive,
     create_run_output_dir,
+    create_forward_model,
+    get_model_grid_support,
     is_3c_model,
     list_available_checkpoints,
     list_available_checkpoints_3d,
+    list_other_models_by_name,
     load_matrix,
+    OTHER_MODELS_DIR,
     resolve_checkpoint_path,
     save_prediction_result,
     to_serializable,
 )
 from dexsy_core.metrics import compute_metrics_dict
+
+# Model grid size support mapping
+MODEL_GRID_SUPPORT = {
+    "pinn": [64],
+    "deeponet": [64],
+    "pinn_3c": [64],
+    "attention_unet": [16, 64],
+    "plain_unet": [16, 64],
+    "deep_unfolding": [16, 64],
+    "fno": [16, 64],
+    "attention_unet_3c": [16, 64],
+    "plain_unet_3c": [16, 64],
+    "deep_unfolding_3c": [16, 64],
+    "2d_ilt": [16, 64],
+    "3d_ilt": [16, 64],
+    "diffusion_refiner": [64],
+}
 
 # Visualization style constants (paper-like, bright and comparable)
 DISPLAY_CMAP = "viridis"
@@ -122,6 +143,12 @@ def _get_model_filtered_checkpoints(model_name: str) -> list[str]:
     if model_name in ("2d_ilt", "3d_ilt"):
         return []  # ILT doesn't need checkpoints
 
+    # Handle other_models
+    if model_name.startswith("other_"):
+        custom_model_name = model_name[len("other_"):]
+        # Other models have only one checkpoint
+        return [f"other_{custom_model_name}/best_model.pt"]
+
     # Determine which checkpoint list to use
     is_3c = is_3c_model(model_name)
     choices = CHECKPOINT_CHOICES_3D if is_3c else CHECKPOINT_CHOICES_2D
@@ -157,6 +184,7 @@ class SignalInputResult:
     params: dict
     input_method: str  # "params" | "random" | "image"
     n_compartments: int = 2  # 2 or 3
+    grid_size: int = 64  # Grid size (16 or 64)
 
 
 @dataclass
@@ -178,6 +206,11 @@ def default_checkpoint_choice(model_name: str) -> str | None:
     if default_path is None:
         return None
     try:
+        # Handle other_models
+        if model_name.startswith("other_"):
+            custom_name = model_name[len("other_"):]
+            return f"other_{custom_name}/best_model.pt"
+        
         # Try relative to 2D checkpoint dir first
         candidate = str(default_path.relative_to(CHECKPOINTS_DIR))
     except ValueError:
@@ -317,9 +350,10 @@ def _generate_parametric(
     exchange_rate_01: float | None = None,
     exchange_rate_02: float | None = None,
     exchange_rate_12: float | None = None,
+    grid_size: int = 64,
 ) -> SignalInputResult:
     """Generate signal from parametric input."""
-    fm = ForwardModel2D()
+    fm = create_forward_model(n_d=grid_size, n_b=grid_size)
 
     if n_compartments == 2:
         if exchange_rate is None:
@@ -358,6 +392,7 @@ def _generate_parametric(
             params=params,
             input_method="params",
             n_compartments=2,
+            grid_size=grid_size,
         )
 
     else:
@@ -393,12 +428,13 @@ def _generate_parametric(
         params=params,
         input_method="params",
         n_compartments=n_compartments,
+        grid_size=grid_size,
     )
 
 
-def _generate_random(n_compartments: int) -> SignalInputResult:
+def _generate_random(n_compartments: int, grid_size: int = 64) -> SignalInputResult:
     """Generate random signal."""
-    fm = ForwardModel2D()
+    fm = create_forward_model(n_d=grid_size, n_b=grid_size)
 
     if n_compartments == 2:
         spectrum, signal, params = fm.generate_2compartment_paper()
@@ -411,6 +447,7 @@ def _generate_random(n_compartments: int) -> SignalInputResult:
         params=params,
         input_method="random",
         n_compartments=n_compartments,
+        grid_size=grid_size,
     )
 
 
@@ -487,11 +524,21 @@ def _run_inference(
     checkpoint_name: str | None,
     device_name: str,
     ground_truth: np.ndarray | None,
+    grid_size: int = 64,
 ) -> InferenceResult:
     """Run inference with the selected model."""
     is_3c = is_3c_model(model_name)
 
-    if checkpoint_name:
+    # Handle other_models checkpoint path
+    if checkpoint_name and checkpoint_name.startswith("other_"):
+        # Extract model name from checkpoint path like "other_custom_model/best_model.pt"
+        parts = checkpoint_name.split("/")
+        if len(parts) >= 2:
+            model_dir = parts[0].replace("other_", "")
+            checkpoint_path = (OTHER_MODELS_DIR / model_dir / "best_model.pt").resolve()
+        else:
+            checkpoint_path = None
+    elif checkpoint_name:
         if is_3c:
             checkpoint_path = (CHECKPOINTS_DIR_3D / checkpoint_name).resolve()
         else:
@@ -500,7 +547,8 @@ def _run_inference(
         checkpoint_path = resolve_checkpoint_path(model_name=model_name)
 
     device = None if device_name == "auto" else device_name
-    fm = ForwardModel2D()
+    # Create forward model with correct grid size
+    fm = create_forward_model(n_d=grid_size, n_b=grid_size)
 
     start_time = time.time()
 
@@ -645,6 +693,16 @@ def build_app():
             # ================================================================
             with gr.TabItem("Step 1: Data Input") as tab1:
                 gr.Markdown("### Select Input Method")
+
+                # Grid size selector at the top
+                with gr.Row():
+                    grid_size = gr.Radio(
+                        choices=[16, 64],
+                        value=64,
+                        label="Grid Size",
+                        info="16x16 for faster processing, 64x64 for higher resolution",
+                    )
+                    gr.Markdown("*Grid size affects both generation and model selection*")
 
                 with gr.Tabs():
                     # --- Tab 1A: Parametric Generation ---
@@ -834,7 +892,7 @@ def build_app():
         )
 
         # --- Parametric Generation (2C) ---
-        def gen_2c_params(d1, d2, vf, rate, tm, ns):
+        def gen_2c_params(d1, d2, vf, rate, tm, ns, gs):
             result = _generate_parametric(
                 n_compartments=2,
                 diffusion_1=d1,
@@ -843,12 +901,13 @@ def build_app():
                 exchange_rate=rate,
                 mixing_time=tm,
                 noise_sigma=ns,
+                grid_size=gs,
             )
             fig, summary = _generate_preview_plot(result)
             return fig, to_serializable(result.params), asdict(result)
 
         # --- Parametric Generation (3C) ---
-        def gen_3c_params(d1, d2, d3, vf1, vf3, r01, r02, r12, tm, ns):
+        def gen_3c_params(d1, d2, d3, vf1, vf3, r01, r02, r12, tm, ns, gs):
             result = _generate_parametric(
                 n_compartments=3,
                 diffusion_1=d1,
@@ -861,6 +920,7 @@ def build_app():
                 exchange_rate_12=r12,
                 mixing_time=tm,
                 noise_sigma=ns,
+                grid_size=gs,
             )
             fig, summary = _generate_preview_plot(result)
             return fig, to_serializable(result.params), asdict(result)
@@ -868,19 +928,21 @@ def build_app():
         # --- Unified wrapper for parametric generation ---
         def gen_params_wrapper(
             n_comp,
+            gs,
             d1, d2, vf, rate, tm, ns,
             d1_3c, d2_3c, d3_3c, vf1_3c, vf3_3c, r01, r02, r12, tm_3c, ns_3c,
         ):
             if n_comp == 2:
-                return gen_2c_params(d1, d2, vf, rate, tm, ns)
+                return gen_2c_params(d1, d2, vf, rate, tm, ns, gs)
             else:
-                return gen_3c_params(d1_3c, d2_3c, d3_3c, vf1_3c, vf3_3c, r01, r02, r12, tm_3c, ns_3c)
+                return gen_3c_params(d1_3c, d2_3c, d3_3c, vf1_3c, vf3_3c, r01, r02, r12, tm_3c, ns_3c, gs)
 
         # Override the 2C button to use the wrapper
         btn_gen_2c.click(
             fn=gen_params_wrapper,
             inputs=[
                 n_compartments_2c,
+                grid_size,
                 diffusion_1, diffusion_2, volume_fraction, exchange_rate, mixing_time, noise_sigma,
                 d1_3c, d2_3c, d3_3c, vf1_3c, vf3_3c, rate_01, rate_02, rate_12, tm_3c, ns_3c,
             ],
@@ -888,14 +950,14 @@ def build_app():
         )
 
         # --- Random Generation ---
-        def gen_random(n_comp):
-            result = _generate_random(n_comp)
+        def gen_random(n_comp, gs):
+            result = _generate_random(n_comp, grid_size=gs)
             fig, summary = _generate_preview_plot(result)
             return fig, to_serializable(result.params), asdict(result)
 
         btn_random.click(
             fn=gen_random,
-            inputs=[n_compartments_random],
+            inputs=[n_compartments_random, grid_size],
             outputs=[preview_plot_random, preview_info_random, input_state],
         )
 
@@ -916,12 +978,19 @@ def build_app():
             else:
                 shape_val = [0]
 
+            # Detect grid size from signal shape
+            if len(shape_val) >= 2:
+                grid_size_detected = shape_val[-1]
+            else:
+                grid_size_detected = 64
+
             result = SignalInputResult(
                 signal=signal,
                 ground_truth=None,
                 params={"shape": shape_val, "source": str(file_path)},
                 input_method="image",
                 n_compartments=2,  # Default to 2C for uploaded images
+                grid_size=grid_size_detected,
             )
             fig, summary = _generate_preview_plot(result)
             info = {
@@ -965,32 +1034,67 @@ def build_app():
             outputs=[current_input_display, inference_status],
         )
 
-        # --- Update Model Dropdown based on n_compartments ---
-        def update_model_choices(state_dict):
+        # --- Update Model Dropdown based on n_compartments and grid size ---
+        def get_other_models_for_grid(grid_sz, n_comp):
+            """Get other_models filtered by grid size and compartments."""
+            other_models = list_other_models_by_name()
+            result = []
+            for model_dir in other_models.keys():
+                try:
+                    import torch
+                    checkpoint_path = OTHER_MODELS_DIR / model_dir / "best_model.pt"
+                    ckpt = torch.load(checkpoint_path, map_location='cpu')
+                    config = ckpt.get('config', {})
+                    model_grid_size = config.get('grid_size', 64)
+                    model_n_comp = config.get('n_compartments', 2)
+                    
+                    # Filter by grid size and compartments
+                    if model_grid_size == grid_sz and model_n_comp == n_comp:
+                        result.append(f"other_{model_dir}")
+                except Exception:
+                    pass
+            return result
+
+        def update_model_choices(state_dict, grid_sz):
             if state_dict is None:
-                return gr.update(choices=available_models())
+                # Return all models that support the selected grid size
+                all_models = available_models()
+                filtered = [m for m in all_models if grid_sz in MODEL_GRID_SUPPORT.get(m, [64])]
+                return gr.update(choices=filtered, value=filtered[0] if filtered else None)
 
             result = SignalInputResult(**state_dict)
             n_comp = result.n_compartments
 
+            # Base models filtered by grid size
             if n_comp == 3:
-                # 3C mode: only show 3C models
-                models_3c = [
+                base_models = [
                     "attention_unet_3c", "plain_unet_3c", "pinn_3c",
                     "deep_unfolding_3c", "diffusion_refiner", "3d_ilt"
                 ]
-                return gr.update(choices=models_3c)
             else:
-                # 2C mode: only show 2C models
-                models_2c = [
+                base_models = [
                     "attention_unet", "plain_unet", "pinn",
                     "deep_unfolding", "deeponet", "fno", "2d_ilt"
                 ]
-                return gr.update(choices=models_2c)
+            
+            base_models = [m for m in base_models if grid_sz in MODEL_GRID_SUPPORT.get(m, [64])]
+            
+            # Add other_models
+            other_models = get_other_models_for_grid(grid_sz, n_comp)
+            all_filtered = base_models + other_models
+            
+            return gr.update(choices=all_filtered, value=all_filtered[0] if all_filtered else None)
 
         input_state.change(
             fn=update_model_choices,
-            inputs=[input_state],
+            inputs=[input_state, grid_size],
+            outputs=[model_name],
+        )
+
+        # Also update when grid size changes
+        grid_size.change(
+            fn=update_model_choices,
+            inputs=[input_state, grid_size],
             outputs=[model_name],
         )
 
@@ -1023,7 +1127,7 @@ def build_app():
         # --- Run Inference ---
         def run_inference_wrapper(input_state_dict, model, checkpoint, device):
             if input_state_dict is None:
-                return None, "<p style='color: red;'>No input confirmed. Please complete Step 1 first.</p>", "", None, None
+                return None, "<p style='color: red;'>No input confirmed. Please complete Step 1 first.</p>", "", None, "", None, None
 
             result = SignalInputResult(**input_state_dict)
             try:
@@ -1033,6 +1137,7 @@ def build_app():
                     checkpoint_name=checkpoint,
                     device_name=device,
                     ground_truth=result.ground_truth,
+                    grid_size=result.grid_size,
                 )
 
                 # Create comparison figure
