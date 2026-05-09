@@ -703,8 +703,9 @@ def _save_bundle(result: InferenceResult, output_dir: Path, stem: str = "result"
     fig.savefig(output_dir / f"{stem}_comparison.png", dpi=150, bbox_inches="tight")
     plt.close(fig)
 
-    # Create archive
-    archive_path = create_output_archive(output_dir, output_dir / f"{stem}_bundle")
+    # Create archive outside the source directory to avoid self-including zip recursion.
+    archive_stem = output_dir.parent / f"{output_dir.name}_{stem}_bundle"
+    archive_path = create_output_archive(output_dir, archive_stem)
     return archive_path
 
 

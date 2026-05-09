@@ -169,9 +169,19 @@ def create_output_archive(
     archive_stem: str | Path | None = None,
 ) -> Path:
     """Zip a saved output directory and return the archive path."""
-    source_dir = Path(source_dir)
+    source_dir = Path(source_dir).resolve()
     if archive_stem is None:
-        archive_stem = source_dir
-    archive_stem = Path(archive_stem)
+        archive_stem = source_dir.parent / source_dir.name
+    archive_stem = Path(archive_stem).resolve()
+
+    # Avoid creating the archive inside the source directory itself.
+    # Otherwise the zip can include its own growing output and hang.
+    try:
+        archive_stem.relative_to(source_dir)
+    except ValueError:
+        pass
+    else:
+        archive_stem = source_dir.parent / archive_stem.name
+
     archive_path = shutil.make_archive(str(archive_stem), "zip", root_dir=str(source_dir))
     return Path(archive_path)
