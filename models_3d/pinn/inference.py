@@ -128,10 +128,9 @@ class PINNInferencePipeline3C:
             device: Device to use ('cuda', 'cpu', or None for auto)
             forward_model: ForwardModel2D instance (creates new if None)
         """
-        self.forward_model = forward_model or ForwardModel2D(n_d=64, n_b=64)
         self._incompatible_checkpoints: list[tuple[Path, str]] = []
 
-        # Resolve checkpoint path
+        # Resolve checkpoint path first (needed to derive grid size)
         if checkpoint_path is None:
             checkpoint_path = self._find_default_checkpoint()
 
@@ -142,28 +141,50 @@ class PINNInferencePipeline3C:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(device)
 
+        # Derive grid size from checkpoint config if forward_model not provided
+        if forward_model is None:
+            if self.checkpoint_path is not None and self.checkpoint_path.exists():
+                checkpoint = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False)
+                config = checkpoint.get('config', {})
+                n_d = config.get('n_d', 64)
+                n_b = config.get('n_b', 64)
+                forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
+            else:
+                forward_model = ForwardModel2D(n_d=64, n_b=64)
+
+        self.forward_model = forward_model
+
         # Load model
         self.model, self.model_metadata = self._load_model()
 
     def _find_default_checkpoint(self) -> Path | None:
         """Find the default compatible checkpoint from bundled locations."""
-        root = Path(__file__).parent.parent.parent / "checkpoints_3d" / "pinn_3c"
-        
-        if not root.exists():
-            return None
-        
-        # Find all best_model.pt files in timestamped subdirectories
-        best_models = list(root.glob("*/best_model.pt"))
+        root = Path(__file__).parent.parent.parent / "checkpoints_3d"
+
+        # Search in both old and new directory structures
+        search_dirs = [
+            root / "pinn_3c",
+            root / "pinn_3c_g64",
+            root / "pinn_3c_g16",
+        ]
+
+        best_models = []
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                best_models.extend(search_dir.glob("*/best_model.pt"))
+                best_models.extend(search_dir.glob("best_model.pt"))
+                best_models.extend(search_dir.glob("pinn_*.pt"))
+
         if not best_models:
             return None
-        
+
         # Check compatibility of each candidate
         for candidate in sorted(best_models, key=lambda p: p.stat().st_mtime, reverse=True):
             compatible, reason = _checkpoint_compatibility_reason(candidate)
             if compatible:
                 return candidate
             self._incompatible_checkpoints.append((candidate, reason))
-        
+
         return None
 
     def _load_model(self) -> tuple:
@@ -211,6 +232,8 @@ class PINNInferencePipeline3C:
             "model_name": self.MODEL_NAME,
             "epoch": config.get('epoch'),
             "val_loss": config.get('val_loss'),
+            "n_d": config.get('n_d', 64),
+            "n_b": config.get('n_b', 64),
         }
 
         return model, metadata

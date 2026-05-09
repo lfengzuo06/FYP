@@ -244,6 +244,8 @@ def train_model(
     seed: int = 42,
     device: str = None,
     checkpoint_path: str = None,
+    n_d: int = 64,
+    n_b: int = 64,
 ) -> tuple:
     """
     Train the Deep Unfolding model on 3C data.
@@ -276,12 +278,14 @@ def train_model(
         seed: Random seed
         device: Device to use ('cuda', 'cpu', or None for auto)
         checkpoint_path: Optional path to load existing weights
+        n_d: Grid size for diffusion dimension
+        n_b: Grid size for b-value dimension
 
     Returns:
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / "deep_unfolding_3c"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / f"deep_unfolding_3c_g{n_d}"
     else:
         output_dir = Path(output_dir)
 
@@ -309,7 +313,7 @@ def train_model(
     )
 
     # Forward model and kernel matrix
-    forward_model = ForwardModel2D(n_d=64, n_b=64)
+    forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
     K = forward_model.kernel_matrix.astype(np.float32)
     K_tensor = torch.from_numpy(K).float().to(device)
 
@@ -352,7 +356,7 @@ def train_model(
     # Model
     model = DeepUnfolding3C(
         n_layers=n_layers,
-        n_d=64,
+        n_d=n_d,
         hidden_dim=hidden_dim,
         use_denoiser=use_denoiser,
         init_method=init_method,
@@ -525,6 +529,8 @@ def train_model(
                     'use_denoiser': use_denoiser,
                     'init_method': init_method,
                     'n_compartments': n_compartments,
+                    'n_d': n_d,
+                    'n_b': n_b,
                 }
             }, output_dir / f"checkpoint_epoch_{epoch+1}.pt")
 
@@ -548,6 +554,8 @@ def train_model(
             'n_compartments': n_compartments,
             'epoch': epochs,
             'val_loss': best_val_loss,
+            'n_d': n_d,
+            'n_b': n_b,
         }
     }, model_dir / "best_model.pt")
     print(f"\nBest model saved to {model_dir / 'best_model.pt'}")
@@ -564,6 +572,8 @@ def train_model(
             'n_compartments': n_compartments,
             'epoch': epochs,
             'val_loss': best_val_loss,
+            'n_d': n_d,
+            'n_b': n_b,
         }
     }, model_dir / "final_model.pt")
 
@@ -650,6 +660,8 @@ def main():
     parser.add_argument('--hidden_dim', type=int, default=256, help='Hidden dimension')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--n_d', type=int, default=64, help='Grid size for diffusion dimension')
+    parser.add_argument('--n_b', type=int, default=64, help='Grid size for b-value dimension')
     args = parser.parse_args()
 
     train_model(
@@ -664,6 +676,8 @@ def main():
         learning_rate=args.lr,
         n_compartments=3,
         seed=args.seed,
+        n_d=args.n_d,
+        n_b=args.n_b,
     )
 
 

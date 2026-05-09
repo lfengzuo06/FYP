@@ -146,6 +146,8 @@ def train_model(
     seed: int = 42,
     device: str = None,
     checkpoint_path: str = None,
+    n_d: int = 64,
+    n_b: int = 64,
 ) -> tuple:
     """
     Train a PINN model on 3C DEXSY.
@@ -168,12 +170,14 @@ def train_model(
         seed: Random seed
         device: Device to use ('cuda', 'cpu', or None for auto)
         checkpoint_path: Optional path to load existing weights
+        n_d: Grid size for diffusion dimension
+        n_b: Grid size for b-value dimension
         
     Returns:
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / "pinn_3c"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / f"pinn_3c_g{n_d}"
     else:
         output_dir = Path(output_dir)
 
@@ -195,7 +199,7 @@ def train_model(
     print(f"Compartments: {n_compartments}")
 
     # Forward model
-    forward_model = ForwardModel2D(n_d=64, n_b=64)
+    forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
 
     # Generate datasets
     print(f"\nGenerating 3C datasets (n_compartments={n_compartments})...")
@@ -248,6 +252,8 @@ def train_model(
         'architecture': 'simple_encoder_decoder',
         'n_compartments': n_compartments,
         'checkpoint_format_version': 1,
+        'n_d': n_d,
+        'n_b': n_b,
     }
 
     # Print model info
@@ -439,6 +445,8 @@ def main():
     parser.add_argument('--batch_size', type=int, default=8, help='Batch size')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--n_d', type=int, default=64, help='Grid size for diffusion dimension')
+    parser.add_argument('--n_b', type=int, default=64, help='Grid size for b-value dimension')
     args = parser.parse_args()
 
     train_model(
@@ -451,6 +459,8 @@ def main():
         learning_rate=args.lr,
         n_compartments=3,
         seed=args.seed,
+        n_d=args.n_d,
+        n_b=args.n_b,
     )
 
 

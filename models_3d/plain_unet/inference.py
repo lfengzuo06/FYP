@@ -73,9 +73,7 @@ class InferencePipelinePlain3C:
             device: Device to use ('cuda', 'cpu', or None for auto)
             forward_model: ForwardModel2D instance (creates new if None)
         """
-        self.forward_model = forward_model or ForwardModel2D(n_d=64, n_b=64)
-
-        # Resolve checkpoint path
+        # Resolve checkpoint path first (needed to derive grid size)
         if checkpoint_path is None:
             checkpoint_path = self._find_default_checkpoint()
 
@@ -86,22 +84,44 @@ class InferencePipelinePlain3C:
             device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.device = torch.device(device)
 
+        # Derive grid size from checkpoint config if forward_model not provided
+        if forward_model is None:
+            if self.checkpoint_path is not None and self.checkpoint_path.exists():
+                checkpoint = torch.load(self.checkpoint_path, map_location="cpu", weights_only=False)
+                config = checkpoint.get('config', {})
+                n_d = config.get('n_d', 64)
+                n_b = config.get('n_b', 64)
+                forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
+            else:
+                forward_model = ForwardModel2D(n_d=64, n_b=64)
+
+        self.forward_model = forward_model
+
         # Load model
         self.model, self.model_metadata = self._load_model()
 
     def _find_default_checkpoint(self) -> Path | None:
         """Find the default checkpoint from bundled locations."""
-        root = Path(__file__).parent.parent.parent / "checkpoints_3d" / "plain_unet_3c"
-        
-        if not root.exists():
-            return None
-        
-        # Find all best_model.pt files in timestamped subdirectories
-        best_models = list(root.glob("*/best_model.pt"))
+        root = Path(__file__).parent.parent.parent / "checkpoints_3d"
+
+        # Search in both old and new directory structures
+        search_dirs = [
+            root / "plain_unet_3c",
+            root / "plain_unet_3c_g64",
+            root / "plain_unet_3c_g16",
+        ]
+
+        best_models = []
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                best_models.extend(search_dir.glob("*/best_model.pt"))
+                best_models.extend(search_dir.glob("best_model.pt"))
+                best_models.extend(search_dir.glob("plain_unet*.pt"))
+
         if best_models:
             # Return the most recent one
             return sorted(best_models, key=lambda p: p.stat().st_mtime)[-1]
-        
+
         return None
 
     def _load_model(self) -> tuple:
@@ -114,6 +134,7 @@ class InferencePipelinePlain3C:
 
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
         state_dict = checkpoint.get('model_state_dict', checkpoint)
+        config = checkpoint.get('config', {})
 
         # Infer model config from state dict
         if 'enc1.conv1.weight' in state_dict:
@@ -139,6 +160,8 @@ class InferencePipelinePlain3C:
             "model_name": self.MODEL_NAME,
             "epoch": checkpoint.get('epoch'),
             "val_loss": checkpoint.get('val_loss'),
+            "n_d": config.get('n_d', 64),
+            "n_b": config.get('n_b', 64),
         }
 
         return model, metadata

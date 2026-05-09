@@ -88,7 +88,6 @@ class InferencePipeline3C:
         else:
             self.device = device
 
-        self.forward_model = forward_model or ForwardModel2D(n_d=64, n_b=64)
         self.n_layers = n_layers
         self.hidden_dim = hidden_dim
 
@@ -110,19 +109,36 @@ class InferencePipeline3C:
                     f"Or provide a checkpoint_path explicitly."
                 )
 
+        # Derive grid size from checkpoint config if forward_model not provided
+        # Must happen AFTER _load_model since it populates model_metadata
+        if forward_model is None:
+            n_d = self.model_metadata.get('n_d', 64)
+            n_b = self.model_metadata.get('n_b', 64)
+            forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
+
+        self.forward_model = forward_model
+
     def _find_default_checkpoint(self) -> Path | None:
         """Find the default checkpoint from bundled locations."""
-        root = Path(__file__).parent.parent.parent / "checkpoints_3d" / "deep_unfolding_3c"
-        
-        if not root.exists():
-            return None
-        
-        # Find all best_model.pt files in timestamped subdirectories
-        best_models = list(root.glob("*/best_model.pt"))
+        root = Path(__file__).parent.parent.parent / "checkpoints_3d"
+
+        # Search in both old and new directory structures
+        search_dirs = [
+            root / "deep_unfolding_3c",
+            root / "deep_unfolding_3c_g64",
+            root / "deep_unfolding_3c_g16",
+        ]
+
+        best_models = []
+        for search_dir in search_dirs:
+            if search_dir.exists():
+                best_models.extend(search_dir.glob("*/best_model.pt"))
+                best_models.extend(search_dir.glob("best_model.pt"))
+
         if best_models:
             # Return the most recent one
             return sorted(best_models, key=lambda p: p.stat().st_mtime)[-1]
-        
+
         return None
 
     def _load_model(self, checkpoint_path: str | Path):
@@ -138,17 +154,22 @@ class InferencePipeline3C:
         n_layers = config.get('n_layers', self.n_layers)
         hidden_dim = config.get('hidden_dim', self.hidden_dim)
         init_method = config.get('init_method', 'mlp')
+        n_d = config.get('n_d', 64)
+        n_b = config.get('n_b', 64)
+
+        # Create forward model for kernel matrix
+        forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
 
         # Create model
         self.model = DeepUnfolding3C(
             n_layers=n_layers,
-            n_d=self.forward_model.n_d,
+            n_d=n_d,
             hidden_dim=hidden_dim,
             init_method=init_method,
         ).to(self.device)
 
         # Set kernel matrix
-        K = self.forward_model.kernel_matrix.astype(np.float32)
+        K = forward_model.kernel_matrix.astype(np.float32)
         K_tensor = torch.from_numpy(K).float().to(self.device)
         self.model.set_kernel_matrix(K_tensor)
 
@@ -168,6 +189,8 @@ class InferencePipeline3C:
             'epoch': config.get('epoch', 'unknown'),
             'val_loss': config.get('val_loss', 'unknown'),
             'model_name': self.MODEL_NAME,
+            'n_d': n_d,
+            'n_b': n_b,
         }
 
     def _validate_checkpoint_keys(

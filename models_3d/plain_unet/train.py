@@ -148,6 +148,8 @@ def train_model(
     seed: int = 42,
     device: str = None,
     checkpoint_path: str = None,
+    n_d: int = 64,
+    n_b: int = 64,
 ) -> tuple:
     """
     Train the Plain U-Net model on 3C data.
@@ -171,12 +173,14 @@ def train_model(
         seed: Random seed
         device: Device to use ('cuda', 'cpu', or None for auto)
         checkpoint_path: Optional path to load existing weights
+        n_d: Grid size for diffusion dimension
+        n_b: Grid size for b-value dimension
 
     Returns:
         (model, history, datasets, forward_model)
     """
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / "plain_unet_3c"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / f"plain_unet_3c_g{n_d}"
     else:
         output_dir = Path(output_dir)
 
@@ -193,7 +197,7 @@ def train_model(
     set_seed(seed)
 
     # Initialize forward model
-    forward_model = ForwardModel2D(n_d=64, n_b=64)
+    forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
 
     # Generate datasets
     print(f"Generating 3C datasets (n_compartments={n_compartments})...")
@@ -362,6 +366,13 @@ def train_model(
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_loss': val_loss,
+                'config': {
+                    'base_filters': base_filters,
+                    'in_channels': datasets['train']['inputs'].shape[1],
+                    'n_compartments': n_compartments,
+                    'n_d': n_d,
+                    'n_b': n_b,
+                }
             }, model_dir / "best_model.pt")
         else:
             patience_counter += 1
@@ -387,6 +398,8 @@ def train_model(
             'base_filters': base_filters,
             'in_channels': datasets['train']['inputs'].shape[1],
             'n_compartments': n_compartments,
+            'n_d': n_d,
+            'n_b': n_b,
         }
     }, model_dir / "final_model.pt")
 
@@ -435,6 +448,8 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--compartments', type=int, default=3, help='Number of compartments')
     parser.add_argument('--n_test', type=int, default=100, help='Number of test samples')
+    parser.add_argument('--n_d', type=int, default=64, help='Grid size for diffusion dimension')
+    parser.add_argument('--n_b', type=int, default=64, help='Grid size for b-value dimension')
     args = parser.parse_args()
 
     train_model(
@@ -448,6 +463,8 @@ def main():
         learning_rate=args.lr,
         n_compartments=args.compartments,
         seed=args.seed,
+        n_d=args.n_d,
+        n_b=args.n_b,
     )
 
 
