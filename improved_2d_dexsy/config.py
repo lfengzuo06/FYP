@@ -24,31 +24,34 @@ DEFAULT_MODEL_NAME = "attention_unet"
 # Grid size support for each model
 # 64: supports 64x64, 16: supports 16x16, [16, 64]: supports both
 MODEL_GRID_SUPPORT = {
-    # 64x64 only models
+    # 64x64 only models (2-compartment)
     "pinn": [64],
     "deeponet": [64],
+    # 64x64 only models (3-compartment)
     "pinn_3c": [64],
-    # Both sizes supported
-    "attention_unet": [16, 64],
+    "diffusion_refiner": [64],
+    # 16x16 only models (2-compartment)
     "attention_unet_g16": [16],
-    "plain_unet": [16, 64],
     "plain_unet_g16": [16],
-    "deep_unfolding": [16, 64],
     "deep_unfolding_g16": [16],
-    "fno": [16, 64],
-    "attention_unet_3c": [16, 64],
+    "pinn_g16": [16],
+    # 16x16 only models (3-compartment)
     "attention_unet_3c_g16": [16],
-    "plain_unet_3c": [16, 64],
     "plain_unet_3c_g16": [16],
-    "deep_unfolding_3c": [16, 64],
+    "pinn_3c_g16": [16],
     "deep_unfolding_3c_g16": [16],
-    # No checkpoint needed
+    # Models supporting both grid sizes (2-compartment)
+    "attention_unet": [16, 64],
+    "plain_unet": [16, 64],
+    "deep_unfolding": [16, 64],
+    "fno": [16, 64],
+    # Models supporting both grid sizes (3-compartment)
+    "attention_unet_3c": [16, 64],
+    "plain_unet_3c": [16, 64],
+    "deep_unfolding_3c": [16, 64],
+    # ILT supports both
     "2d_ilt": [16, 64],
     "3d_ilt": [16, 64],
-    # Special models
-    "diffusion_refiner": [64],
-    "pinn_g16": [16],
-    "pinn_3c_g16": [16],
 }
 
 # 2C models (using checkpoints_2d)
@@ -86,9 +89,6 @@ ALL_MODELS = {**DEFAULT_CHECKPOINTS, **DEFAULT_CHECKPOINTS_3D}
 
 def is_3c_model(model_name: str) -> bool:
     """Check if a model is a 3C model."""
-    # Handle g16 suffix
-    base_name = model_name.replace("_g16", "")
-    
     if model_name.startswith("other_"):
         # Check from other_models directory
         custom_model_name = model_name[len("other_"):]
@@ -102,6 +102,13 @@ def is_3c_model(model_name: str) -> bool:
             except Exception:
                 pass
         return False
+    
+    # Check if model name contains 3C indicator
+    if "_3c" in model_name:
+        return True
+    
+    # Also check the base name in DEFAULT_CHECKPOINTS_3D
+    base_name = model_name.replace("_g16", "")
     return base_name in DEFAULT_CHECKPOINTS_3D
 
 

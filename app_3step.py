@@ -49,27 +49,34 @@ from dexsy_core.metrics import compute_metrics_dict
 
 # Model grid size support mapping
 MODEL_GRID_SUPPORT = {
+    # 64x64 only models (2-compartment)
     "pinn": [64],
     "deeponet": [64],
+    # 64x64 only models (3-compartment)
     "pinn_3c": [64],
-    "attention_unet": [16, 64],
+    "diffusion_refiner": [64],
+    # 16x16 only models (2-compartment)
     "attention_unet_g16": [16],
-    "plain_unet": [16, 64],
     "plain_unet_g16": [16],
-    "deep_unfolding": [16, 64],
     "deep_unfolding_g16": [16],
-    "fno": [16, 64],
-    "attention_unet_3c": [16, 64],
+    "pinn_g16": [16],
+    # 16x16 only models (3-compartment)
     "attention_unet_3c_g16": [16],
-    "plain_unet_3c": [16, 64],
     "plain_unet_3c_g16": [16],
-    "deep_unfolding_3c": [16, 64],
+    "pinn_3c_g16": [16],
     "deep_unfolding_3c_g16": [16],
+    # Models supporting both grid sizes (2-compartment)
+    "attention_unet": [16, 64],
+    "plain_unet": [16, 64],
+    "deep_unfolding": [16, 64],
+    "fno": [16, 64],
+    # Models supporting both grid sizes (3-compartment)
+    "attention_unet_3c": [16, 64],
+    "plain_unet_3c": [16, 64],
+    "deep_unfolding_3c": [16, 64],
+    # ILT supports both
     "2d_ilt": [16, 64],
     "3d_ilt": [16, 64],
-    "diffusion_refiner": [64],
-    "pinn_g16": [16],
-    "pinn_3c_g16": [16],
 }
 
 # Visualization style constants (paper-like, bright and comparable)
@@ -474,10 +481,18 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
     params = result.params
     grid_size = result.grid_size
 
+    # For 16x16, use nearest neighbor (no interpolation); for 64x64, use bilinear
+    if grid_size == 16:
+        display_interp = "nearest"  # No smoothing for small grids
+        display_cmap = DISPLAY_CMAP
+    else:
+        display_interp = DISPLAY_INTERPOLATION
+        display_cmap = DISPLAY_CMAP
+
     fig, axes = plt.subplots(1, 3, figsize=(13, 3.5))
 
     # Signal
-    im0 = axes[0].imshow(signal, cmap=DISPLAY_CMAP, origin="lower", interpolation=DISPLAY_INTERPOLATION)
+    im0 = axes[0].imshow(signal, cmap=display_cmap, origin="lower", interpolation=display_interp)
     axes[0].set_title("Input Signal", fontsize=11)
     axes[0].set_xlabel("b2 index")
     axes[0].set_ylabel("b1 index")
@@ -485,28 +500,28 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
 
     # Log Signal
     log_signal = np.log(signal + 1e-6)
-    im1 = axes[1].imshow(log_signal, cmap=DISPLAY_CMAP, origin="lower", interpolation=DISPLAY_INTERPOLATION)
+    im1 = axes[1].imshow(log_signal, cmap=display_cmap, origin="lower", interpolation=display_interp)
     axes[1].set_title("Log(Signal)", fontsize=11)
     axes[1].set_xlabel("b2 index")
     axes[1].set_ylabel("b1 index")
     plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
     # Ground Truth (brighter linear display)
-    # For 16x16, don't apply smoothing; for 64x64, apply smoothing
+    # For 16x16, don't apply smoothing or interpolation; for 64x64, apply both
     if ground_truth is not None:
         if grid_size == 16:
-            # No smoothing for 16x16
+            # No smoothing, no interpolation for 16x16
             gt_display = ground_truth
         else:
             gt_display = _smooth_spectrum_for_display(ground_truth)
         vmin, vmax = _shared_linear_display_range(gt_display)
         im2 = axes[2].imshow(
             gt_display,
-            cmap=DISPLAY_CMAP,
+            cmap=display_cmap,
             origin="lower",
             vmin=vmin,
             vmax=vmax,
-            interpolation=DISPLAY_INTERPOLATION,
+            interpolation=display_interp,
         )
         gt_title = "Ground Truth Spectrum"
         if "mixing_time" in params:
@@ -1033,7 +1048,7 @@ def build_app():
         # --- Confirm Input ---
         def confirm_input(state_dict):
             if state_dict is None:
-                return gr.update(visible=True), "<p style='color: red;'>No input confirmed. Please generate or upload a signal first.</p>"
+                return gr.update(visible=True), "<p style='color: red;'>No input confirmed. Please generate or upload a signal first.</p>", None
             result = SignalInputResult(**state_dict)
             summary = {
                 "Method": result.input_method,
@@ -1048,12 +1063,12 @@ def build_app():
                 html += f"<tr><td style='padding: 6px; border: 1px solid #dee2e6; font-weight: bold;'>{k}</td>"
                 html += f"<td style='padding: 6px; border: 1px solid #dee2e6;'>{v}</td></tr>"
             html += "</table>"
-            return summary, html
+            return summary, html, state_dict
 
         btn_confirm.click(
             fn=confirm_input,
             inputs=[input_state],
-            outputs=[current_input_display, inference_status],
+            outputs=[current_input_display, inference_status, input_state],
         )
 
         # --- Update Model Dropdown based on n_compartments and grid size ---
@@ -1159,6 +1174,14 @@ def build_app():
 
             result = SignalInputResult(**input_state_dict)
             try:
+                # Debug logging
+                print(f"[DEBUG] Running inference with:")
+                print(f"  - Model: {model}")
+                print(f"  - Checkpoint: {checkpoint}")
+                print(f"  - Device: {device}")
+                print(f"  - Grid size: {result.grid_size}")
+                print(f"  - Signal shape: {result.signal.shape}")
+                
                 inference_result = _run_inference(
                     signal=result.signal,
                     model_name=model,
@@ -1205,6 +1228,8 @@ def build_app():
             except Exception as e:
                 import traceback
                 error_msg = f"<p style='color: red;'>Error: {str(e)}</p><pre>{traceback.format_exc()}</pre>"
+                print(f"[ERROR] Inference failed: {str(e)}")
+                traceback.print_exc()
                 return None, error_msg, "", None, "", None, None
 
         btn_run.click(
