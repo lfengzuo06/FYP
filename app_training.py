@@ -387,6 +387,13 @@ def run_training(
     best_val_loss = float('inf')
     best_model_state = None
     patience_counter = 0
+
+    print(
+        f"[train] model={model_type} grid={grid_size}x{grid_size} "
+        f"compartments={n_compartments} epochs={epochs} batch_size={batch_size} "
+        f"lr={learning_rate}",
+        flush=True,
+    )
     
     if progress_callback:
         progress_callback(0.2, "Starting training...")
@@ -466,13 +473,33 @@ def run_training(
         history['val_loss'].append(val_loss)
         history['lr'].append(optimizer.param_groups[0]['lr'])
         
+        prev_best_val_loss = best_val_loss
+
         # Update best model
         if val_loss < best_val_loss:
             best_val_loss = val_loss
             best_model_state = deepcopy(model.state_dict())
             patience_counter = 0
+            improved = True
         else:
             patience_counter += 1
+            improved = False
+
+        current_lr = optimizer.param_groups[0]['lr']
+        if improved:
+            print(
+                f"[epoch {epoch+1:03d}/{epochs:03d}] "
+                f"train={train_loss:.6f} val={val_loss:.6f} lr={current_lr:.2e} "
+                f"(best {prev_best_val_loss:.6f} -> {best_val_loss:.6f})",
+                flush=True,
+            )
+        else:
+            print(
+                f"[epoch {epoch+1:03d}/{epochs:03d}] "
+                f"train={train_loss:.6f} val={val_loss:.6f} lr={current_lr:.2e} "
+                f"(no improve, patience {patience_counter}/{early_stopping_patience})",
+                flush=True,
+            )
         
         # Progress update
         progress_pct = 0.2 + (epoch + 1) / epochs * 0.6
@@ -484,6 +511,7 @@ def run_training(
         
         # Early stopping
         if patience_counter >= early_stopping_patience:
+            print(f"[train] Early stopping triggered at epoch {epoch+1}", flush=True)
             if progress_callback:
                 progress_callback(progress_pct, f"Early stopping at epoch {epoch+1}")
             break
