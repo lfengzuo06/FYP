@@ -116,7 +116,6 @@ from models_3d.attention_unet.inference import InferencePipeline3C as AttentionI
 from models_3d.plain_unet.inference import InferencePipelinePlain3C as PlainInferencePipeline3D
 from models_3d.pinn.inference import PINNInferencePipeline3C as PINNInferencePipeline3D
 from models_3d.deep_unfolding.inference import InferencePipeline3C as DeepUnfoldingInferencePipeline3D
-from models_3d.diffusion_refiner.inference import UncertaintyEstimator as DiffusionRefinerPipeline
 
 
 class DEXSYInferencePipeline:
@@ -129,7 +128,7 @@ class DEXSYInferencePipeline:
     Args:
         model_name: Model type ('attention_unet', 'plain_unet', 'pinn', 'deep_unfolding',
                     'deeponet', 'fno', '2d_ilt', 'attention_unet_3c', 'plain_unet_3c',
-                    'pinn_3c', 'deep_unfolding_3c', 'diffusion_refiner', '3d_ilt')
+                    'pinn_3c', 'deep_unfolding_3c', '3d_ilt')
         checkpoint_path: Path to model checkpoint (not needed for ILT)
         device: Device to use ('cuda', 'cpu', or None for auto)
         forward_model: ForwardModel2D instance (creates new if None)
@@ -161,7 +160,6 @@ class DEXSYInferencePipeline:
         "pinn_3c_g16": PINNInferencePipeline3D,
         "deep_unfolding_3c": DeepUnfoldingInferencePipeline3D,
         "deep_unfolding_3c_g16": DeepUnfoldingInferencePipeline3D,
-        "diffusion_refiner": DiffusionRefinerPipeline,
         "3d_ilt": None,  # Will be handled separately
     }
 

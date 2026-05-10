@@ -29,7 +29,6 @@ MODEL_GRID_SUPPORT = {
     "deeponet": [64],
     # 64x64 only models (3-compartment)
     "pinn_3c": [64],
-    "diffusion_refiner": [64],
     # 16x16 only models (2-compartment)
     "attention_unet_g16": [16],
     "plain_unet_g16": [16],
@@ -79,7 +78,6 @@ DEFAULT_CHECKPOINTS_3D = {
     "pinn_3c_g16": "pinn_3c_g16/checkpoints_20260509_071819/best_model.pt",
     "deep_unfolding_3c": "deep_unfolding_3c/checkpoints_20260501_121714/best_model.pt",
     "deep_unfolding_3c_g16": "deep_unfolding_3c_g16/checkpoints_20260509_075729/best_model.pt",
-    "diffusion_refiner": "diffusion_refiner/checkpoints_20260430_161942/best_model.pt",
     "3d_ilt": None,  # ILT doesn't require a checkpoint
 }
 

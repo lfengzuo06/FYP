@@ -54,7 +54,6 @@ MODEL_GRID_SUPPORT = {
     "deeponet": [64],
     # 64x64 only models (3-compartment)
     "pinn_3c": [64],
-    "diffusion_refiner": [64],
     # 16x16 only models (2-compartment)
     "attention_unet_g16": [16],
     "plain_unet_g16": [16],
@@ -188,7 +187,6 @@ def _get_model_filtered_checkpoints(model_name: str) -> list[str]:
         "pinn_3c_g16": "pinn_3c_g16/",
         "deep_unfolding_3c": "deep_unfolding_3c/",
         "deep_unfolding_3c_g16": "deep_unfolding_3c_g16/",
-        "diffusion_refiner": "diffusion_refiner/",
     }
     model_prefix = model_prefix_map.get(model_name, f"{model_name}/")
 
@@ -1107,7 +1105,7 @@ def build_app():
             if n_comp == 3:
                 base_models = [
                     "attention_unet_3c", "plain_unet_3c", "pinn_3c",
-                    "deep_unfolding_3c", "diffusion_refiner", "3d_ilt"
+                    "deep_unfolding_3c", "3d_ilt"
                 ]
                 # Add g16 models for 3C
                 if grid_sz == 16:
