@@ -35,7 +35,7 @@ _root = Path(__file__).parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from dexsy_core.forward_model_nc import ForwardModelNC
+from dexsy_core.forward_model_nc import ForwardModelNC, create_forward_model_nc
 from dexsy_core.preprocessing import build_model_inputs
 
 from .model import AttentionUNetND, PhysicsInformedLossND
@@ -142,6 +142,9 @@ def train_model(
     seed: int = 42,
     device: str = None,
     checkpoint_path: str = None,
+    n_d: int = 64,
+    n_b: int = 64,
+    grid_size: int | None = None,
 ) -> tuple:
     """
     Train the Attention U-Net model on N-Compartment DEXSY data.
@@ -165,12 +168,19 @@ def train_model(
         seed: Random seed
         device: Device to use ('cuda', 'cpu', or None for auto)
         checkpoint_path: Optional path to load existing weights
+        n_d: Grid size for diffusion dimension
+        n_b: Grid size for b-value dimension
+        grid_size: Shorthand to set both n_d and n_b
 
     Returns:
         (model, history, datasets, forward_model)
     """
+    if grid_size is not None:
+        n_d = int(grid_size)
+        n_b = int(grid_size)
+
     if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "checkpoints_nd" / f"attention_unet_nc{n_compartments}"
+        output_dir = Path(__file__).parent.parent.parent / "checkpoints_nd" / f"attention_unet_nc{n_compartments}_g{n_d}"
     else:
         output_dir = Path(output_dir)
 
@@ -187,7 +197,7 @@ def train_model(
     set_seed(seed)
 
     # Initialize forward model
-    forward_model = ForwardModelNC(n_d=64, n_b=64)
+    forward_model = create_forward_model_nc(n_d=n_d, n_b=n_b)
 
     # Generate datasets
     print(f"Generating N-Compartment datasets (n_compartments={n_compartments})...")
@@ -434,7 +444,16 @@ def main():
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
     parser.add_argument('--compartments', type=int, default=3, help='Number of compartments')
     parser.add_argument('--n_test', type=int, default=100, help='Number of test samples')
+    parser.add_argument('--n_d', type=int, default=64, help='Grid size for diffusion dimension')
+    parser.add_argument('--n_b', type=int, default=64, help='Grid size for b-value dimension')
+    parser.add_argument('--grid_size', type=int, default=None, help='Shorthand: set both n_d and n_b')
     args = parser.parse_args()
+
+    n_d = args.n_d
+    n_b = args.n_b
+    if args.grid_size is not None:
+        n_d = int(args.grid_size)
+        n_b = int(args.grid_size)
 
     train_model(
         output_dir=args.output_dir,
@@ -447,6 +466,8 @@ def main():
         learning_rate=args.lr,
         n_compartments=args.compartments,
         seed=args.seed,
+        n_d=n_d,
+        n_b=n_b,
     )
 
 

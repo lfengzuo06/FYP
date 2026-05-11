@@ -18,6 +18,7 @@ from .model import (
 
 from .train import train_model, DEXSYDatasetND
 from .train_unified import train_unified_model, DEXSYDatasetMixedN
+from .inference import UnifiedInferencePipeline, UnifiedPredictionResult
 
 __all__ = [
     # Single-N model
@@ -34,4 +35,7 @@ __all__ = [
     'get_unified_loss',
     'train_unified_model',
     'DEXSYDatasetMixedN',
+    # Unified inference
+    'UnifiedInferencePipeline',
+    'UnifiedPredictionResult',
 ]

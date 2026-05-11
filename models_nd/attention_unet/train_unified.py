@@ -36,7 +36,7 @@ _root = Path(__file__).parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from dexsy_core.forward_model import ForwardModel2D, create_forward_model
+from dexsy_core.forward_model_nc import ForwardModelNC, create_forward_model_nc
 from dexsy_core.preprocessing import build_model_inputs
 
 from .model import AttentionUNetUnified, AttentionUNetND, UnifiedLoss, PhysicsInformedLossND
@@ -47,7 +47,7 @@ class DEXSYDatasetMixedN(Dataset):
 
     def __init__(
         self,
-        forward_model: ForwardModel2D,
+        forward_model: ForwardModelNC,
         n_samples: int,
         n_min: int = 2,
         n_max: int = 7,
@@ -228,7 +228,7 @@ def train_unified_model(
     set_seed(seed)
 
     # Initialize forward model using factory function
-    forward_model = create_forward_model(n_d=n_d, n_b=n_b)
+    forward_model = create_forward_model_nc(n_d=n_d, n_b=n_b)
 
     # Generate datasets
     print(f"\nGenerating Mixed N datasets (N in [{n_min}, {n_max}])...")

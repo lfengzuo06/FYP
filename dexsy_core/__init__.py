@@ -20,6 +20,12 @@ from .forward_model import (
     compute_pairwise_3c_dei,
     local_square_mask,
 )
+from .forward_model_nc import (
+    ForwardModelNC,
+    GRID_PROFILES_NC,
+    create_forward_model_nc,
+    compute_nc_weight_matrix_dei,
+)
 
 __all__ = [
     "ForwardModel2D",
@@ -31,4 +37,8 @@ __all__ = [
     "compute_pair_blob_dei",
     "compute_pairwise_3c_dei",
     "local_square_mask",
+    "ForwardModelNC",
+    "GRID_PROFILES_NC",
+    "create_forward_model_nc",
+    "compute_nc_weight_matrix_dei",
 ]

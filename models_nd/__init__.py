@@ -19,6 +19,8 @@ from .attention_unet import (
     get_unified_loss,
     train_unified_model,
     DEXSYDatasetMixedN,
+    UnifiedInferencePipeline,
+    UnifiedPredictionResult,
 )
 
 __all__ = [
@@ -36,4 +38,6 @@ __all__ = [
     'get_unified_loss',
     'train_unified_model',
     'DEXSYDatasetMixedN',
+    'UnifiedInferencePipeline',
+    'UnifiedPredictionResult',
 ]

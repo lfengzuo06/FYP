@@ -34,6 +34,72 @@ import numpy as np
 from typing import Optional, Literal
 
 
+# =============================================================================
+# Grid Size Profiles (N-Compartment)
+# =============================================================================
+
+GRID_PROFILES_NC = {
+    64: {
+        "d_min": 5e-12,
+        "d_max": 5e-8,
+        "jitter_pixels": 1,
+        "min_index_separation": 4,
+        "smoothing_sigma_range": (0.65, 1.15),
+        "g_max": 1.5,
+        "delta": 0.003,
+        "DELTA": 0.01,
+        "compartment_ranges": {
+            "intracellular": (5e-12, 3e-11),
+            "extracellular": (3e-11, 5e-9),
+            "fast": (5e-9, 5e-8),
+        },
+    },
+    16: {
+        "d_min": 1e-11,
+        "d_max": 1e-8,
+        "jitter_pixels": 0,
+        "min_index_separation": 2,
+        "smoothing_sigma_range": (0.4, 0.8),
+        "g_max": 1.5,
+        "delta": 0.003,
+        "DELTA": 0.01,
+        "compartment_ranges": {
+            "intracellular": (1.5e-11, 4e-11),
+            "extracellular": (1e-10, 7e-10),
+            "fast": (1.5e-9, 7e-9),
+        },
+    },
+}
+
+
+def create_forward_model_nc(
+    n_d: int = 64,
+    n_b: int = 64,
+    profile: int | None = None,
+    **kwargs,
+) -> "ForwardModelNC":
+    """
+    Factory for ForwardModelNC with 16/64 profile support.
+
+    If ``profile`` is not provided and ``n_d`` matches a known profile,
+    that profile is auto-selected.
+    """
+    if profile is None and n_d in GRID_PROFILES_NC:
+        profile = n_d
+
+    if profile is not None:
+        profile_size = int(profile)
+        if profile_size not in GRID_PROFILES_NC:
+            raise ValueError(f"Unknown profile: {profile_size}. Use 16 or 64.")
+        config = GRID_PROFILES_NC[profile_size].copy()
+        config["n_d"] = profile_size
+        config["n_b"] = profile_size
+        config.update(kwargs)
+        return ForwardModelNC(**config)
+
+    return ForwardModelNC(n_d=n_d, n_b=n_b, **kwargs)
+
+
 def _gaussian_filter(image: np.ndarray, sigma: float) -> np.ndarray:
     """Apply Gaussian smoothing."""
     if sigma <= 0:
@@ -72,6 +138,7 @@ class ForwardModelNC:
         jitter_pixels: int = 1,
         smoothing_sigma_range: tuple[float, float] = (0.65, 1.15),
         min_index_separation: int = 4,
+        compartment_ranges: Optional[dict[str, tuple[float, float]]] = None,
         spectral_broadening_mode: str = "directional",
         alpha: float = 0.5,
         epsilon: float = 1e-10,
@@ -96,6 +163,8 @@ class ForwardModelNC:
             smoothing_sigma_range: Gaussian broadening sigma range (pixels).
             min_index_separation: Minimum projected grid separation between
                 compartment diffusivities.
+            compartment_ranges: Sampling ranges for diffusion values in each
+                biological compartment family.
             spectral_broadening_mode: "directional" or "isotropic".
             alpha: Scaling factor parameter for diagonal dominance constraint.
                 Default 0.5 ensures w_ii >= 0.5 * phi_i.
@@ -118,11 +187,15 @@ class ForwardModelNC:
         self.epsilon = epsilon
 
         # Compartment diffusion ranges
-        self.compartment_ranges = {
-            "intracellular": (5e-12, 3e-11),
-            "extracellular": (3e-11, 5e-9),
-            "fast": (5e-9, 5e-8),
-        }
+        self.compartment_ranges = (
+            compartment_ranges
+            if compartment_ranges is not None
+            else {
+                "intracellular": (5e-12, 3e-11),
+                "extracellular": (3e-11, 5e-9),
+                "fast": (5e-9, 5e-8),
+            }
+        )
 
         # Build diffusion grid (log-spaced)
         self.D = np.logspace(np.log10(d_min), np.log10(d_max), n_d)
