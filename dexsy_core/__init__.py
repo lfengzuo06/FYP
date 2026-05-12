@@ -26,6 +26,14 @@ from .forward_model_nc import (
     create_forward_model_nc,
     compute_nc_weight_matrix_dei,
 )
+from .forward_model_3c_nongaussian import (
+    ForwardModel3CNonGaussian,
+    COMPARTMENTS_3C,
+    PATHWAYS_3C,
+    GRID_PROFILES_3C_NG,
+    create_forward_model_3c_nongaussian,
+    compute_3c_weight_matrix_dei,
+)
 
 __all__ = [
     "ForwardModel2D",
@@ -41,4 +49,10 @@ __all__ = [
     "GRID_PROFILES_NC",
     "create_forward_model_nc",
     "compute_nc_weight_matrix_dei",
+    "ForwardModel3CNonGaussian",
+    "COMPARTMENTS_3C",
+    "PATHWAYS_3C",
+    "GRID_PROFILES_3C_NG",
+    "create_forward_model_3c_nongaussian",
+    "compute_3c_weight_matrix_dei",
 ]
