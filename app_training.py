@@ -64,6 +64,36 @@ MODEL_SPECS: dict[str, dict[str, str]] = {
     "nonGaussian_cnn": {"label": "NonGaussian 3C CNN", "family": "pathway_regression"},
 }
 
+MODEL_GRID_SUPPORT: dict[str, list[int]] = {
+    "2d_attention_unet": [16, 64],
+    "2d_plain_unet": [16, 64],
+    "2d_pinn": [16, 64],
+    "2d_deep_unfolding": [16, 64],
+    "2d_fno": [16, 64],
+    "2d_deeponet": [64],
+    "3d_attention_unet": [16, 64],
+    "3d_plain_unet": [16, 64],
+    "3d_pinn": [16, 64],
+    "3d_deep_unfolding": [16, 64],
+    "nd_attention_unet": [16, 64],
+    "nonGaussian_cnn": [16, 64],
+}
+
+MODEL_CHECKPOINT_KEYWORDS: dict[str, list[str]] = {
+    "2d_attention_unet": ["attention_unet"],
+    "2d_plain_unet": ["plain_unet"],
+    "2d_pinn": ["pinn"],
+    "2d_deep_unfolding": ["deep_unfolding"],
+    "2d_fno": ["fno"],
+    "2d_deeponet": ["deeponet"],
+    "3d_attention_unet": ["attention_unet_3c"],
+    "3d_plain_unet": ["plain_unet_3c"],
+    "3d_pinn": ["pinn_3c"],
+    "3d_deep_unfolding": ["deep_unfolding_3c"],
+    "nd_attention_unet": ["unified_n", "attention_unet"],
+    "nonGaussian_cnn": ["inverse_3c", "nongaussian"],
+}
+
 
 COMPARE_DATASET_PURPOSES = {
     "train_val_test": "Training Dataset (train/val/test)",
@@ -762,10 +792,12 @@ def _models_for_dataset(dataset) -> list[str]:
     n_comp = _infer_dataset_n_compartments(dataset)
 
     if task_type == "pathway_regression":
-        return ["nonGaussian_cnn"]
+        base_keys = ["nonGaussian_cnn"]
+        n_b = int(dataset.config.get("n_b", 16))
+        return [k for k in base_keys if n_b in MODEL_GRID_SUPPORT.get(k, [16, 64])]
 
     if model_type == "gaussian_2c":
-        return [
+        base_keys = [
             "2d_attention_unet",
             "2d_plain_unet",
             "2d_pinn",
@@ -773,22 +805,39 @@ def _models_for_dataset(dataset) -> list[str]:
             "2d_fno",
             "2d_deeponet",
         ]
+        n_b = int(dataset.config.get("n_b", 16))
+        filtered = [k for k in base_keys if n_b in MODEL_GRID_SUPPORT.get(k, [16, 64])]
+        return filtered or base_keys
     if model_type == "gaussian_3c":
-        return [
+        base_keys = [
             "3d_attention_unet",
             "3d_plain_unet",
             "3d_pinn",
             "3d_deep_unfolding",
         ]
+        n_b = int(dataset.config.get("n_b", 16))
+        filtered = [k for k in base_keys if n_b in MODEL_GRID_SUPPORT.get(k, [16, 64])]
+        return filtered or base_keys
     if model_type == "gaussian_nc":
-        return ["nd_attention_unet"]
+        base_keys = ["nd_attention_unet"]
+        n_b = int(dataset.config.get("n_b", 16))
+        return [k for k in base_keys if n_b in MODEL_GRID_SUPPORT.get(k, [16, 64])]
 
     # Fallback by inferred compartment count.
     if n_comp == 2:
-        return ["2d_attention_unet", "2d_plain_unet", "2d_pinn", "2d_deep_unfolding", "2d_fno", "2d_deeponet"]
+        base_keys = ["2d_attention_unet", "2d_plain_unet", "2d_pinn", "2d_deep_unfolding", "2d_fno", "2d_deeponet"]
+        n_b = int(dataset.config.get("n_b", 16))
+        filtered = [k for k in base_keys if n_b in MODEL_GRID_SUPPORT.get(k, [16, 64])]
+        return filtered or base_keys
     if n_comp == 3:
-        return ["3d_attention_unet", "3d_plain_unet", "3d_pinn", "3d_deep_unfolding"]
-    return ["nd_attention_unet"]
+        base_keys = ["3d_attention_unet", "3d_plain_unet", "3d_pinn", "3d_deep_unfolding"]
+        n_b = int(dataset.config.get("n_b", 16))
+        filtered = [k for k in base_keys if n_b in MODEL_GRID_SUPPORT.get(k, [16, 64])]
+        return filtered or base_keys
+    base_keys = ["nd_attention_unet"]
+    n_b = int(dataset.config.get("n_b", 16))
+    filtered = [k for k in base_keys if n_b in MODEL_GRID_SUPPORT.get(k, [16, 64])]
+    return filtered or base_keys
 
 
 def _model_choices_from_keys(model_keys: list[str]) -> list[tuple[str, str]]:
@@ -814,31 +863,47 @@ def _on_compare_dataset_change(base_path: str, dataset_id: str):
         ds = load_dataset(dataset_id, base_path=base_path, verify=False)
         detail = _dataset_detail_json(base_path, dataset_id)
         model_keys = _models_for_dataset(ds)
+        if not model_keys:
+            return (
+                gr.update(choices=[], value=[]),
+                detail,
+                (
+                    f"No compatible model family for dataset `{dataset_id}` "
+                    f"(model_type={ds.config.get('model_type')}, n_b={ds.config.get('n_b')})."
+                ),
+            )
         history_rows = _load_history_rows()
 
         choices: list[tuple[str, str]] = []
         values: list[str] = []
+        available_count = 0
         for model_key in model_keys:
-            run_row, ckpt_path = _latest_compatible_run_for_model(
+            source, run_row, ckpt_path = _discover_checkpoint_for_model(
                 base_path=base_path,
                 dataset=ds,
                 model_key=model_key,
                 history_rows=history_rows,
             )
-            if run_row is None:
-                label = f"{model_key} | no compatible trained checkpoint"
+            if ckpt_path is None:
+                label = f"{model_key} | unavailable (no checkpoint found)"
             else:
-                label = (
-                    f"{model_key} | run={run_row.get('run_id')} | "
-                    f"name={run_row.get('run_name') or '-'} | ckpt={_safe_rel(ckpt_path)}"
-                )
+                available_count += 1
+                if source == "history" and run_row is not None:
+                    label = (
+                        f"{model_key} | from run={run_row.get('run_id')} | "
+                        f"name={run_row.get('run_name') or '-'} | ckpt={_safe_rel(ckpt_path)}"
+                    )
+                else:
+                    label = f"{model_key} | from checkpoints dir | ckpt={_safe_rel(ckpt_path)}"
                 values.append(model_key)
             choices.append((label, model_key))
 
         status = (
             f"Loaded {len(model_keys)} model option(s) for dataset `{dataset_id}`. "
-            "Checked models will use latest compatible trained checkpoint."
+            f"Available: {available_count}. Checked models will use latest available checkpoint."
         )
+        if available_count == 0:
+            status += " No loadable checkpoint found for this dataset type/grid."
         return gr.update(choices=choices, value=values), detail, status
     except Exception as exc:
         return gr.update(choices=[], value=[]), {"error": str(exc)}, f"Failed to load compare runs: {exc}"
@@ -1326,6 +1391,168 @@ def _latest_compatible_run_for_model(
     return None, None
 
 
+def _candidate_checkpoint_roots(model_key: str, n_b: int) -> list[Path]:
+    roots: list[Path] = []
+    if model_key == "2d_attention_unet":
+        if n_b == 16:
+            roots = [ROOT / "checkpoints_2d" / "attention_unet_g16", ROOT / "checkpoints_2d" / "attention_unet"]
+        else:
+            roots = [ROOT / "checkpoints_2d" / "attention_unet", ROOT / "checkpoints_2d" / "attention_unet_g64"]
+    elif model_key == "2d_plain_unet":
+        if n_b == 16:
+            roots = [
+                ROOT / "checkpoints_2d" / "plain_unet_g16_2c",
+                ROOT / "checkpoints_2d" / "plain_unet_g16",
+                ROOT / "checkpoints_2d" / "plain_unet",
+            ]
+        else:
+            roots = [ROOT / "checkpoints_2d" / "plain_unet", ROOT / "checkpoints_2d" / "plain_unet_2c"]
+    elif model_key == "2d_pinn":
+        if n_b == 16:
+            roots = [ROOT / "checkpoints_2d" / "pinn_g16_2c", ROOT / "checkpoints_2d" / "pinn_g16"]
+        else:
+            roots = [ROOT / "checkpoints_2d" / "pinn", ROOT / "checkpoints_2d" / "pinn_2c"]
+    elif model_key == "2d_deep_unfolding":
+        if n_b == 16:
+            roots = [
+                ROOT / "checkpoints_2d" / "deep_unfolding_g16_2c",
+                ROOT / "checkpoints_2d" / "deep_unfolding_g16",
+                ROOT / "checkpoints_2d" / "deep_unfolding",
+            ]
+        else:
+            roots = [ROOT / "checkpoints_2d" / "deep_unfolding", ROOT / "checkpoints_2d" / "deep_unfolding_2c"]
+    elif model_key == "2d_fno":
+        roots = [ROOT / "checkpoints_2d" / "fno", ROOT / "checkpoints_2d" / ("fno_g16" if n_b == 16 else "fno_g64")]
+    elif model_key == "2d_deeponet":
+        roots = [ROOT / "checkpoints_2d" / "deeponet", ROOT / "checkpoints_2d" / ("deeponet_g16" if n_b == 16 else "deeponet_g64")]
+    elif model_key == "3d_attention_unet":
+        if n_b == 16:
+            roots = [ROOT / "checkpoints_3d" / "attention_unet_3c_g16", ROOT / "checkpoints_3d" / "attention_unet_3c"]
+        else:
+            roots = [ROOT / "checkpoints_3d" / "attention_unet_3c", ROOT / "checkpoints_3d" / "attention_unet_3c_g64"]
+    elif model_key == "3d_plain_unet":
+        if n_b == 16:
+            roots = [ROOT / "checkpoints_3d" / "plain_unet_3c_g16", ROOT / "checkpoints_3d" / "plain_unet_3c"]
+        else:
+            roots = [ROOT / "checkpoints_3d" / "plain_unet_3c", ROOT / "checkpoints_3d" / "plain_unet_3c_g64"]
+    elif model_key == "3d_pinn":
+        if n_b == 16:
+            roots = [ROOT / "checkpoints_3d" / "pinn_3c_g16", ROOT / "checkpoints_3d" / "pinn_3c"]
+        else:
+            roots = [ROOT / "checkpoints_3d" / "pinn_3c", ROOT / "checkpoints_3d" / "pinn_3c_g64"]
+    elif model_key == "3d_deep_unfolding":
+        if n_b == 16:
+            roots = [ROOT / "checkpoints_3d" / "deep_unfolding_3c_g16", ROOT / "checkpoints_3d" / "deep_unfolding_3c"]
+        else:
+            roots = [ROOT / "checkpoints_3d" / "deep_unfolding_3c", ROOT / "checkpoints_3d" / "deep_unfolding_3c_g64"]
+    elif model_key == "nd_attention_unet":
+        if n_b == 16:
+            roots = [ROOT / "checkpoints_nd" / "unified_n2_7_g16", ROOT / "checkpoints_nd" / "unified_n2_7"]
+        else:
+            roots = [ROOT / "checkpoints_nd" / "unified_n2_7", ROOT / "checkpoints_nd" / "unified_n2_7_g64"]
+    elif model_key == "nonGaussian_cnn":
+        if n_b == 16:
+            roots = [ROOT / "checkpoints_nonGaussian" / "inverse_3c_g16", ROOT / "checkpoints_nonGaussian" / "inverse_3c"]
+        else:
+            roots = [ROOT / "checkpoints_nonGaussian" / "inverse_3c", ROOT / "checkpoints_nonGaussian" / "inverse_3c_g64"]
+    return roots
+
+
+def _latest_checkpoint_from_roots(roots: list[Path]) -> Path | None:
+    files: list[Path] = []
+    for root in roots:
+        if not root.exists():
+            continue
+        files.extend(root.rglob("*best*.pt"))
+        files.extend(root.rglob("*.pt"))
+    files = [p for p in files if p.is_file() and not _looks_like_lfs_pointer(p)]
+    if not files:
+        return None
+    files_sorted = sorted(files, key=lambda p: p.stat().st_mtime, reverse=True)
+    for p in files_sorted:
+        if "best" in p.name.lower():
+            return p.resolve()
+    return files_sorted[0].resolve()
+
+
+def _looks_like_lfs_pointer(path: Path) -> bool:
+    try:
+        if path.stat().st_size > 2048:
+            return False
+        head = path.read_bytes()[:256]
+    except Exception:
+        return False
+    return head.startswith(b"version https://git-lfs.github.com/spec/v1")
+
+
+def _checkpoint_family_root_for_model(model_key: str) -> Path | None:
+    if model_key.startswith("2d_"):
+        return ROOT / "checkpoints_2d"
+    if model_key.startswith("3d_"):
+        return ROOT / "checkpoints_3d"
+    if model_key == "nd_attention_unet":
+        return ROOT / "checkpoints_nd"
+    if model_key == "nonGaussian_cnn":
+        return ROOT / "checkpoints_nonGaussian"
+    return None
+
+
+def _latest_checkpoint_by_keyword(model_key: str, n_b: int) -> Path | None:
+    family_root = _checkpoint_family_root_for_model(model_key)
+    if family_root is None or not family_root.exists():
+        return None
+    keywords = [k.lower() for k in MODEL_CHECKPOINT_KEYWORDS.get(model_key, [])]
+    files = [p for p in family_root.rglob("*.pt") if p.is_file() and not _looks_like_lfs_pointer(p)]
+    if not files:
+        return None
+
+    scored: list[tuple[int, float, Path]] = []
+    for p in files:
+        path_l = p.as_posix().lower()
+        score = 0
+        if keywords:
+            if any(k in path_l for k in keywords):
+                score += 2
+            else:
+                continue
+        if n_b == 16 and "g16" in path_l:
+            score += 1
+        if n_b == 64 and "g16" not in path_l:
+            score += 1
+        if "best" in p.name.lower():
+            score += 1
+        scored.append((score, p.stat().st_mtime, p))
+    if not scored:
+        return None
+    scored.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return scored[0][2].resolve()
+
+
+def _discover_checkpoint_for_model(
+    *,
+    base_path: str,
+    dataset,
+    model_key: str,
+    history_rows: list[dict[str, Any]] | None = None,
+) -> tuple[str, dict[str, Any] | None, Path | None]:
+    run_row, ckpt_path = _latest_compatible_run_for_model(
+        base_path=base_path,
+        dataset=dataset,
+        model_key=model_key,
+        history_rows=history_rows,
+    )
+    if run_row is not None and ckpt_path is not None and ckpt_path.exists():
+        return "history", run_row, ckpt_path
+
+    n_b = int(dataset.config.get("n_b", 16))
+    fallback = _latest_checkpoint_from_roots(_candidate_checkpoint_roots(model_key=model_key, n_b=n_b))
+    if fallback is None:
+        fallback = _latest_checkpoint_by_keyword(model_key=model_key, n_b=n_b)
+    if fallback is not None and fallback.exists():
+        return "checkpoint_dir", None, fallback
+    return "none", None, None
+
+
 def _normalize_state_dict_keys(state_dict: dict[str, Any]) -> dict[str, Any]:
     if not state_dict:
         return state_dict
@@ -1336,7 +1563,16 @@ def _normalize_state_dict_keys(state_dict: dict[str, Any]) -> dict[str, Any]:
 
 
 def _load_model_state(model: torch.nn.Module, checkpoint_path: Path, device: torch.device) -> None:
-    ckpt = torch.load(str(checkpoint_path), map_location=device)
+    # Local checkpoints may be saved with older torch versions; force full load for compatibility.
+    try:
+        ckpt = torch.load(str(checkpoint_path), map_location=device, weights_only=False)
+    except TypeError:
+        ckpt = torch.load(str(checkpoint_path), map_location=device)
+    except Exception as exc:
+        if "weights_only" in str(exc).lower():
+            ckpt = torch.load(str(checkpoint_path), map_location=device, weights_only=False)
+        else:
+            raise
     if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
         state_dict = ckpt["model_state_dict"]
     elif isinstance(ckpt, dict) and all(torch.is_tensor(v) for v in ckpt.values()):
@@ -1362,7 +1598,7 @@ def _evaluate_reconstruction_checkpoint(
     dataset,
     model_key: str,
     checkpoint_path: Path,
-    run_row: dict[str, Any],
+    run_row: dict[str, Any] | None,
     batch_size_eval: int,
 ) -> dict[str, float]:
     from dexsy_core.forward_model import create_forward_model
@@ -1370,7 +1606,7 @@ def _evaluate_reconstruction_checkpoint(
     from dexsy_core.preprocessing import build_model_inputs
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    cfg = dict(run_row.get("config", {}))
+    cfg = dict((run_row or {}).get("config", {}))
     n_b = int(dataset.config.get("n_b", 16))
     n_comp = _infer_dataset_n_compartments(dataset)
     split = dataset.get_split("test")
@@ -1473,7 +1709,7 @@ def _evaluate_reconstruction_checkpoint(
 def _evaluate_pathway_checkpoint(
     dataset,
     checkpoint_path: Path,
-    run_row: dict[str, Any],
+    run_row: dict[str, Any] | None,
     batch_size_eval: int,
 ) -> dict[str, float]:
     from models_nonGaussian.cnn.model import NonGaussian3CInverseNet
@@ -1486,7 +1722,7 @@ def _evaluate_pathway_checkpoint(
     if true_pathway.ndim == 3:
         true_pathway = true_pathway.reshape(true_pathway.shape[0], -1)
     true_dei = np.asarray(split["dei"], dtype=np.float32).reshape(-1)
-    cfg = dict(run_row.get("config", {}))
+    cfg = dict((run_row or {}).get("config", {}))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = NonGaussian3CInverseNet(
         hidden_dim=int(cfg.get("hidden_dim", 256)),
@@ -1513,7 +1749,7 @@ def _evaluate_pathway_checkpoint(
 def _plot_compare_summary(compare_rows: list[dict[str, Any]], metric_name: str) -> plt.Figure | None:
     if not compare_rows:
         return None
-    labels = [f"{r['run_id']}\n({r['model_key']})" for r in compare_rows]
+    labels = [MODEL_SPECS.get(str(r["model_key"]), {}).get("label", str(r["model_key"])) for r in compare_rows]
     values = [float(r["metric_value"]) for r in compare_rows]
     fig, ax = plt.subplots(figsize=(max(8, len(compare_rows) * 1.4), 4.8))
     x = np.arange(len(compare_rows))
@@ -1547,52 +1783,63 @@ def _run_fair_compare_ui(
 
         compare_rows: list[dict[str, Any]] = []
         skipped_models: list[str] = []
+        failed_models: list[str] = []
         for model_key in model_keys:
-            run, ckpt_path = _latest_compatible_run_for_model(
+            source, run, ckpt_path = _discover_checkpoint_for_model(
                 base_path=base_path,
                 dataset=dataset,
                 model_key=str(model_key),
                 history_rows=history_rows,
             )
-            if run is None or ckpt_path is None:
+            if ckpt_path is None:
                 skipped_models.append(str(model_key))
                 continue
 
-            t0 = time.time()
-            if dataset.task_type == "pathway_regression":
-                metrics = _evaluate_pathway_checkpoint(
-                    dataset=dataset,
-                    checkpoint_path=ckpt_path,
-                    run_row=run,
-                    batch_size_eval=int(batch_size_eval),
+            try:
+                t0 = time.time()
+                if dataset.task_type == "pathway_regression":
+                    metrics = _evaluate_pathway_checkpoint(
+                        dataset=dataset,
+                        checkpoint_path=ckpt_path,
+                        run_row=run,
+                        batch_size_eval=int(batch_size_eval),
+                    )
+                    metric_name = "pathway_mse"
+                else:
+                    metrics = _evaluate_reconstruction_checkpoint(
+                        dataset=dataset,
+                        model_key=str(model_key),
+                        checkpoint_path=ckpt_path,
+                        run_row=run,
+                        batch_size_eval=int(batch_size_eval),
+                    )
+                    metric_name = "mse_mean"
+                compare_rows.append(
+                    {
+                        "run_id": run.get("run_id") if run is not None else "direct_checkpoint",
+                        "run_name": (run.get("run_name") or "") if run is not None else "(checkpoint dir)",
+                        "train_dataset_id": run.get("dataset_id") if run is not None else "",
+                        "test_dataset_id": dataset_id,
+                        "model_key": str(model_key),
+                        "metric_name": metric_name,
+                        "metric_value": float(metrics.get(metric_name, np.nan)),
+                        "metrics": metrics,
+                        "eval_seconds": float(time.time() - t0),
+                        "checkpoint_path": str(ckpt_path),
+                        "checkpoint_source": source,
+                    }
                 )
-                metric_name = "pathway_mse"
-            else:
-                metrics = _evaluate_reconstruction_checkpoint(
-                    dataset=dataset,
-                    model_key=str(run.get("model_key")),
-                    checkpoint_path=ckpt_path,
-                    run_row=run,
-                    batch_size_eval=int(batch_size_eval),
-                )
-                metric_name = "mse_mean"
-            compare_rows.append(
-                {
-                    "run_id": run.get("run_id"),
-                    "run_name": run.get("run_name") or "",
-                    "train_dataset_id": run.get("dataset_id"),
-                    "test_dataset_id": dataset_id,
-                    "model_key": run.get("model_key"),
-                    "metric_name": metric_name,
-                    "metric_value": float(metrics.get(metric_name, np.nan)),
-                    "metrics": metrics,
-                    "eval_seconds": float(time.time() - t0),
-                    "checkpoint_path": str(ckpt_path),
-                }
-            )
+            except Exception as model_exc:
+                failed_models.append(f"{model_key}: {model_exc}")
+                continue
 
         if not compare_rows:
-            return "No compatible/evaluable runs were found for this dataset.", [], [], None
+            extra = ""
+            if skipped_models:
+                extra += f"\nSkipped (no checkpoint): {', '.join(skipped_models)}"
+            if failed_models:
+                extra += f"\nFailed to evaluate: {' | '.join(failed_models)}"
+            return f"No compatible/evaluable models were found for this dataset.{extra}", [], [], None
 
         compare_rows.sort(key=lambda r: float(r["metric_value"]))
         metric_name = compare_rows[0]["metric_name"]
@@ -1632,10 +1879,13 @@ def _run_fair_compare_ui(
         skipped_note = ""
         if skipped_models:
             skipped_note = f"\nSkipped (no compatible checkpoint): {', '.join(skipped_models)}"
+        failed_note = ""
+        if failed_models:
+            failed_note = f"\nFailed to evaluate: {' | '.join(failed_models)}"
         status = (
             f"Fair compare completed on test dataset `{dataset_id}`.\n"
             f"Evaluated {len(compare_rows)} model(s) using latest compatible trained checkpoint. "
-            f"Lower `{metric_name}` is better.{skipped_note}"
+            f"Lower `{metric_name}` is better.{skipped_note}{failed_note}"
         )
         return status, summary_rows, run_rows, fig
     except Exception as exc:

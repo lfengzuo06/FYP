@@ -1105,6 +1105,7 @@ def build_app():
                             value=default_checkpoint_choice("attention_unet"),
                             label="Checkpoint",
                             info="Model checkpoint file",
+                            allow_custom_value=True,
                         )
                         device_name = gr.Dropdown(
                             choices=["auto", "cpu", "cuda"],
