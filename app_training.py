@@ -14,6 +14,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
+import shutil
 import sys
 import time
 from copy import deepcopy
@@ -368,6 +369,22 @@ def _export_dataset_config(base_path: str, dataset_id: str):
     if not config_path.exists():
         return f"Config not found for `{dataset_id}`.", None
     return f"Config ready: `{config_path}`", str(config_path)
+
+
+def _delete_dataset_from_form(base_path: str, dataset_id: str):
+    if not dataset_id:
+        rows, refresh_status, lab_dd, ext_dd, train_dd, compare_dd = _refresh_dataset_registry(base_path)
+        return rows, f"{refresh_status}\nPlease select a dataset to delete.", lab_dd, ext_dd, train_dd, compare_dd
+    ds_path = _dataset_dir(base_path, dataset_id)
+    try:
+        if not ds_path.exists() or not ds_path.is_dir():
+            raise FileNotFoundError(f"Dataset directory not found: {ds_path}")
+        shutil.rmtree(ds_path)
+        status = f"Deleted dataset `{dataset_id}`."
+    except Exception as exc:
+        status = f"Failed to delete dataset `{dataset_id}`: {exc}"
+    rows, refresh_status, lab_dd, ext_dd, train_dd, compare_dd = _refresh_dataset_registry(base_path)
+    return rows, f"{refresh_status}\n{status}", lab_dd, ext_dd, train_dd, compare_dd
 
 
 def _default_params_for_model(model_type: str, n_compartments_nc: int) -> tuple[str, dict[str, Any]]:
@@ -792,28 +809,36 @@ def _on_training_dataset_change(base_path: str, dataset_id: str):
 
 def _on_compare_dataset_change(base_path: str, dataset_id: str):
     if not dataset_id:
-        return gr.update(choices=[], value=[]), {}, "Select a test dataset to load compatible runs."
+        return gr.update(choices=[], value=[]), {}, "Select a test dataset first."
     try:
         ds = load_dataset(dataset_id, base_path=base_path, verify=False)
         detail = _dataset_detail_json(base_path, dataset_id)
-        rows = _load_history_rows()
-        choices = []
-        for row in rows:
-            if not _is_run_compatible_with_dataset(ds, row):
-                continue
-            ckpt = row.get("checkpoint_path")
-            if not ckpt or not Path(ckpt).exists():
-                continue
-            run_id = row.get("run_id")
-            if not run_id:
-                continue
-            label = (
-                f"{run_id} | {row.get('model_key', '?')} | "
-                f"name={row.get('run_name') or '-'} | train_ds={row.get('dataset_id', '?')}"
+        model_keys = _models_for_dataset(ds)
+        history_rows = _load_history_rows()
+
+        choices: list[tuple[str, str]] = []
+        values: list[str] = []
+        for model_key in model_keys:
+            run_row, ckpt_path = _latest_compatible_run_for_model(
+                base_path=base_path,
+                dataset=ds,
+                model_key=model_key,
+                history_rows=history_rows,
             )
-            choices.append((label, run_id))
-        status = f"Loaded {len(choices)} compatible trained run(s) for dataset `{dataset_id}`."
-        values = [c[1] for c in choices[: min(4, len(choices))]]
+            if run_row is None:
+                label = f"{model_key} | no compatible trained checkpoint"
+            else:
+                label = (
+                    f"{model_key} | run={run_row.get('run_id')} | "
+                    f"name={run_row.get('run_name') or '-'} | ckpt={_safe_rel(ckpt_path)}"
+                )
+                values.append(model_key)
+            choices.append((label, model_key))
+
+        status = (
+            f"Loaded {len(model_keys)} model option(s) for dataset `{dataset_id}`. "
+            "Checked models will use latest compatible trained checkpoint."
+        )
         return gr.update(choices=choices, value=values), detail, status
     except Exception as exc:
         return gr.update(choices=[], value=[]), {"error": str(exc)}, f"Failed to load compare runs: {exc}"
@@ -1215,21 +1240,90 @@ def _run_training_ui(
         return f"Training failed: {exc}", None, {}, {}
 
 
-def _is_run_compatible_with_dataset(dataset, run_row: dict[str, Any]) -> bool:
+def _resolve_checkpoint_path_from_run(run_row: dict[str, Any]) -> Path | None:
+    ckpt = run_row.get("checkpoint_path")
+    if not ckpt:
+        return None
+    path = Path(str(ckpt))
+    if not path.is_absolute():
+        path = (ROOT / path).resolve()
+    return path
+
+
+def _run_training_dataset_n_b(base_path: str, run_row: dict[str, Any]) -> int | None:
+    run_dataset_id = run_row.get("dataset_id")
+    if not run_dataset_id:
+        return None
+    cfg_path = _dataset_dir(base_path, str(run_dataset_id)) / "config.yaml"
+    if not cfg_path.exists():
+        return None
+    try:
+        cfg = _read_yaml(cfg_path)
+    except Exception:
+        return None
+    try:
+        return int(cfg.get("n_b"))
+    except Exception:
+        return None
+
+
+def _is_run_compatible_with_dataset(
+    dataset,
+    run_row: dict[str, Any],
+    *,
+    base_path: str | None = None,
+    require_same_grid: bool = True,
+) -> bool:
     model_key = str(run_row.get("model_key", ""))
     if not model_key:
         return False
     if dataset.task_type == "pathway_regression":
-        return model_key == "nonGaussian_cnn"
+        ok = model_key == "nonGaussian_cnn"
+    else:
+        model_type = dataset.config.get("model_type")
+        if model_type == "gaussian_2c":
+            ok = model_key.startswith("2d_")
+        elif model_type == "gaussian_3c":
+            ok = model_key.startswith("3d_")
+        elif model_type == "gaussian_nc":
+            ok = model_key == "nd_attention_unet"
+        else:
+            ok = False
 
-    model_type = dataset.config.get("model_type")
-    if model_type == "gaussian_2c":
-        return model_key.startswith("2d_")
-    if model_type == "gaussian_3c":
-        return model_key.startswith("3d_")
-    if model_type == "gaussian_nc":
-        return model_key == "nd_attention_unet"
-    return False
+    if not ok:
+        return False
+
+    ckpt_path = _resolve_checkpoint_path_from_run(run_row)
+    if ckpt_path is None or not ckpt_path.exists():
+        return False
+
+    if require_same_grid and base_path is not None:
+        run_n_b = _run_training_dataset_n_b(base_path, run_row)
+        dataset_n_b = int(dataset.config.get("n_b", -1))
+        if run_n_b is None or run_n_b != dataset_n_b:
+            return False
+
+    return True
+
+
+def _latest_compatible_run_for_model(
+    *,
+    base_path: str,
+    dataset,
+    model_key: str,
+    history_rows: list[dict[str, Any]] | None = None,
+) -> tuple[dict[str, Any] | None, Path | None]:
+    rows = history_rows if history_rows is not None else _load_history_rows()
+    for row in rows:
+        if str(row.get("model_key")) != str(model_key):
+            continue
+        if not _is_run_compatible_with_dataset(dataset, row, base_path=base_path, require_same_grid=True):
+            continue
+        ckpt_path = _resolve_checkpoint_path_from_run(row)
+        if ckpt_path is None:
+            continue
+        return row, ckpt_path
+    return None, None
 
 
 def _normalize_state_dict_keys(state_dict: dict[str, Any]) -> dict[str, Any]:
@@ -1436,13 +1530,13 @@ def _plot_compare_summary(compare_rows: list[dict[str, Any]], metric_name: str) 
 def _run_fair_compare_ui(
     base_path: str,
     dataset_id: str,
-    run_ids: list[str],
+    model_keys: list[str],
     batch_size_eval: int,
 ):
     if not dataset_id:
         return "Please select a test dataset first.", [], [], None
-    if not run_ids:
-        return "Please select trained runs to compare.", [], [], None
+    if not model_keys:
+        return "Please select model(s) to compare.", [], [], None
 
     try:
         dataset = load_dataset(dataset_id, base_path=base_path, verify=False)
@@ -1450,20 +1544,18 @@ def _run_fair_compare_ui(
             return f"Dataset `{dataset_id}` has no test samples.", [], [], None
 
         history_rows = _load_history_rows()
-        by_id = {str(r.get("run_id")): r for r in history_rows}
 
         compare_rows: list[dict[str, Any]] = []
-        for run_id in run_ids:
-            run = by_id.get(str(run_id))
-            if run is None:
-                continue
-            if not _is_run_compatible_with_dataset(dataset, run):
-                continue
-            ckpt_raw = run.get("checkpoint_path")
-            ckpt_path = Path(str(ckpt_raw))
-            if not ckpt_path.is_absolute():
-                ckpt_path = (ROOT / ckpt_path).resolve()
-            if not ckpt_path.exists():
+        skipped_models: list[str] = []
+        for model_key in model_keys:
+            run, ckpt_path = _latest_compatible_run_for_model(
+                base_path=base_path,
+                dataset=dataset,
+                model_key=str(model_key),
+                history_rows=history_rows,
+            )
+            if run is None or ckpt_path is None:
+                skipped_models.append(str(model_key))
                 continue
 
             t0 = time.time()
@@ -1537,9 +1629,13 @@ def _run_fair_compare_ui(
             for r in compare_rows
         ]
         fig = _plot_compare_summary(compare_rows, metric_name)
+        skipped_note = ""
+        if skipped_models:
+            skipped_note = f"\nSkipped (no compatible checkpoint): {', '.join(skipped_models)}"
         status = (
             f"Fair compare completed on test dataset `{dataset_id}`.\n"
-            f"Evaluated {len(compare_rows)} trained run(s). Lower `{metric_name}` is better."
+            f"Evaluated {len(compare_rows)} model(s) using latest compatible trained checkpoint. "
+            f"Lower `{metric_name}` is better.{skipped_note}"
         )
         return status, summary_rows, run_rows, fig
     except Exception as exc:
@@ -1680,7 +1776,9 @@ def build_app():
                 with gr.Row():
                     dataset_select_lab = gr.Dropdown(label="Select Dataset", choices=[])
                     verify_btn = gr.Button("Verify Dataset", variant="secondary")
+                    delete_dataset_btn = gr.Button("Delete Dataset", variant="stop")
                 verify_status = gr.Textbox(label="Verification Status", lines=2)
+                delete_status = gr.Textbox(label="Delete Status", lines=2)
                 dataset_detail = gr.JSON(label="Dataset Details")
                 with gr.Row():
                     export_config_btn = gr.Button("Export Config YAML", variant="secondary")
@@ -1806,10 +1904,10 @@ def build_app():
                     compare_batch_size_eval = gr.Number(value=64, precision=0, label="Eval Batch Size")
                 compare_dataset_info = gr.JSON(label="Selected Dataset Snapshot")
                 compare_run_choices = gr.CheckboxGroup(
-                    label="Trained Runs (from history, compatible only)",
+                    label="Models (use latest compatible trained checkpoint)",
                     choices=[],
                 )
-                compare_candidates_status = gr.Textbox(label="Run Selection Status", lines=2)
+                compare_candidates_status = gr.Textbox(label="Model Availability", lines=2)
 
                 run_compare_btn = gr.Button("Run Fair Compare", variant="primary")
                 compare_status = gr.Textbox(label="Compare Status", lines=3)
@@ -1872,6 +1970,18 @@ def build_app():
             fn=_verify_dataset,
             inputs=[datasets_base_path, dataset_select_lab],
             outputs=[verify_status, dataset_detail],
+        )
+        delete_dataset_btn.click(
+            fn=_delete_dataset_from_form,
+            inputs=[datasets_base_path, dataset_select_lab],
+            outputs=[
+                dataset_table,
+                delete_status,
+                dataset_select_lab,
+                dataset_select_extend,
+                train_dataset_id,
+                compare_dataset_id,
+            ],
         )
         export_config_btn.click(
             fn=_export_dataset_config,

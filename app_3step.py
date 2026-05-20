@@ -1422,20 +1422,9 @@ def build_app():
         )
 
         # --- Update Checkpoint Dropdown ---
-        def update_checkpoint(model, current_checkpoint):
+        def update_checkpoint(model):
             filtered_choices = _get_model_filtered_checkpoints(model)
             choices = filtered_choices if filtered_choices else CHECKPOINT_CHOICES
-
-            if current_checkpoint and str(current_checkpoint) in choices:
-                return gr.update(choices=choices, value=str(current_checkpoint))
-
-            if current_checkpoint:
-                ckpt_path = Path(str(current_checkpoint))
-                if ckpt_path.is_absolute() and ckpt_path.exists():
-                    ckpt_str = str(ckpt_path)
-                    if ckpt_str not in choices:
-                        choices = [ckpt_str] + list(choices)
-                    return gr.update(choices=choices, value=ckpt_str)
 
             default = default_checkpoint_choice(model) if filtered_choices else None
             if default not in choices:
@@ -1444,7 +1433,7 @@ def build_app():
 
         model_name.change(
             fn=update_checkpoint,
-            inputs=[model_name, checkpoint_name],
+            inputs=[model_name],
             outputs=[checkpoint_name],
         )
 
