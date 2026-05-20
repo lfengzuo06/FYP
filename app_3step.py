@@ -1426,6 +1426,9 @@ def build_app():
             filtered_choices = _get_model_filtered_checkpoints(model)
             choices = filtered_choices if filtered_choices else CHECKPOINT_CHOICES
 
+            if current_checkpoint and str(current_checkpoint) in choices:
+                return gr.update(choices=choices, value=str(current_checkpoint))
+
             if current_checkpoint:
                 ckpt_path = Path(str(current_checkpoint))
                 if ckpt_path.is_absolute() and ckpt_path.exists():
@@ -1435,6 +1438,8 @@ def build_app():
                     return gr.update(choices=choices, value=ckpt_str)
 
             default = default_checkpoint_choice(model) if filtered_choices else None
+            if default not in choices:
+                default = choices[0] if choices else None
             return gr.update(choices=choices, value=default)
 
         model_name.change(

@@ -5,15 +5,18 @@ DEXSY training interface focused on reproducibility and fair comparison.
 Tabs:
 1) Dataset Lab       - create/list/verify/preview/extend immutable datasets
 2) Training Runs     - train on selected dataset with fixed seeds
-3) Fair Compare      - run model x seed grid on the same dataset
+3) Fair Compare      - evaluate already-trained runs on a selected test dataset
 4) Experiment History - inspect run manifests and checkpoints
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
+import re
 import sys
 import time
+from copy import deepcopy
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -30,6 +33,8 @@ if str(ROOT) not in sys.path:
 
 from dexsy_core.metrics import compute_batch_metrics
 from dexsy_datasets import create_dataset, extend_dataset, load_dataset
+from dexsy_datasets.core import ImmutableDataset, compute_dataset_id
+from dexsy_datasets.storage import save_dataset
 
 DATASETS_DIR_DEFAULT = ROOT / "datasets"
 RUNS_DIR_DEFAULT = ROOT / "outputs" / "research_runs"
@@ -57,6 +62,70 @@ MODEL_SPECS: dict[str, dict[str, str]] = {
     # Non-Gaussian pathway regression
     "nonGaussian_cnn": {"label": "NonGaussian 3C CNN", "family": "pathway_regression"},
 }
+
+
+COMPARE_DATASET_PURPOSES = {
+    "train_val_test": "Training Dataset (train/val/test)",
+    "compare_test_only": "Compare/Test Dataset (test only)",
+}
+
+
+def _sanitize_name(text: str, fallback: str = "run") -> str:
+    cleaned = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(text or "").strip())
+    cleaned = cleaned.strip("_").lower()
+    return cleaned[:48] if cleaned else fallback
+
+
+def _to_python_scalar(value: Any) -> Any:
+    if isinstance(value, (np.floating, np.integer)):
+        return value.item()
+    if isinstance(value, np.ndarray):
+        return value.tolist()
+    if isinstance(value, dict):
+        return {str(k): _to_python_scalar(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_python_scalar(v) for v in value]
+    return value
+
+
+def _default_params_yaml(model_type: str, n_compartments_nc: int) -> str:
+    _, params = _default_params_for_model(model_type, n_compartments_nc)
+    return yaml.safe_dump(params, sort_keys=False, default_flow_style=False)
+
+
+def _parse_params_override_text(text: str) -> dict[str, Any]:
+    raw = str(text or "").strip()
+    if not raw:
+        return {}
+    loaded = yaml.safe_load(raw)
+    if loaded is None:
+        return {}
+    if not isinstance(loaded, dict):
+        raise ValueError("Parameter override must be a YAML/JSON dictionary.")
+    if isinstance(loaded.get("params"), dict):
+        return dict(loaded["params"])
+    return dict(loaded)
+
+
+def _hash_payload(payload: dict[str, Any]) -> str:
+    normalized = _to_python_scalar(payload)
+    data = json.dumps(normalized, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()[:16]
+
+
+def _coerce_float_list(value: Any, expected_len: int | None = None, name: str = "value") -> list[float]:
+    if value is None:
+        raise ValueError(f"`{name}` is required.")
+    if isinstance(value, str):
+        parts = [p for p in value.replace(" ", "").split(",") if p]
+        arr = [float(p) for p in parts]
+    elif isinstance(value, (list, tuple, np.ndarray)):
+        arr = [float(v) for v in value]
+    else:
+        raise ValueError(f"`{name}` must be a list/tuple or comma-separated string.")
+    if expected_len is not None and len(arr) != expected_len:
+        raise ValueError(f"`{name}` must have length {expected_len}, got {len(arr)}.")
+    return arr
 
 
 def _ensure_run_storage() -> None:
@@ -331,6 +400,24 @@ def _default_params_for_model(model_type: str, n_compartments_nc: int) -> tuple[
     return task_type, params
 
 
+def _on_create_model_change(model_type: str, n_compartments_nc: int) -> str:
+    return _default_params_yaml(model_type, int(n_compartments_nc))
+
+
+def _on_create_purpose_change(dataset_purpose: str):
+    if dataset_purpose == "compare_test_only":
+        return (
+            gr.update(value=0),
+            gr.update(value=0),
+            gr.update(value=400),
+        )
+    return (
+        gr.update(),
+        gr.update(),
+        gr.update(),
+    )
+
+
 def _create_dataset_from_form(
     base_path: str,
     model_type: str,
@@ -340,26 +427,47 @@ def _create_dataset_from_form(
     n_test: int,
     seed: int,
     n_compartments_nc: int,
+    sampling_strategy: str,
+    dataset_purpose: str,
+    params_override_text: str,
 ):
     try:
-        task_type, params = _default_params_for_model(model_type, n_compartments_nc)
+        task_type, default_params = _default_params_for_model(model_type, n_compartments_nc)
+        params_override = _parse_params_override_text(params_override_text)
+        params = {**default_params, **params_override}
+
+        n_train_i = int(n_train)
+        n_val_i = int(n_val)
+        n_test_i = int(n_test)
+        if dataset_purpose == "compare_test_only":
+            n_train_i = 0
+            n_val_i = 0
+
         config = {
             "version": "1.0",
             "protocol_version": "1",
             "generator_version": "1.0.0",
             "task_type": task_type,
-            "n_train": int(n_train),
-            "n_val": int(n_val),
-            "n_test": int(n_test),
+            "n_train": n_train_i,
+            "n_val": n_val_i,
+            "n_test": n_test_i,
             "n_b": int(n_b),
             "model_type": model_type,
             "params": params,
-            "sampling_strategy": "log_uniform",
+            "sampling_strategy": sampling_strategy,
             "min_index_separation": 0,
             "seed": int(seed),
         }
+        if dataset_purpose == "compare_test_only":
+            config["dataset_role"] = "compare_test_only"
+        if params_override:
+            config["params_override_hash"] = _hash_payload(params_override)
+
         ds = create_dataset(config=config, output_dir=base_path, generator_version="1.0.0")
-        status = f"Created dataset `{ds.dataset_id}` ({model_type}, task={task_type})."
+        status = (
+            f"Created dataset `{ds.dataset_id}` ({model_type}, task={task_type}, purpose={dataset_purpose}).\n"
+            f"split sizes: train={ds.n_train}, val={ds.n_val}, test={ds.n_test}"
+        )
     except Exception as exc:
         status = f"Failed to create dataset: {exc}"
     rows, refresh_status, lab_dd, ext_dd, train_dd, compare_dd = _refresh_dataset_registry(base_path)
@@ -383,6 +491,235 @@ def _extend_dataset_from_form(base_path: str, dataset_id: str, add_train: int):
         )
     except Exception as exc:
         status = f"Failed to extend dataset: {exc}"
+
+    rows, refresh_status, lab_dd, ext_dd, train_dd, compare_dd = _refresh_dataset_registry(base_path)
+    return rows, f"{refresh_status}\n{status}", lab_dd, ext_dd, train_dd, compare_dd
+
+
+def _manual_sample_template() -> str:
+    template = {
+        "diffusions": [1.0e-9, 2.0e-9],
+        "volume_fractions": [0.6, 0.4],
+        "exchange_rates": [2.0],
+        "mixing_time": 0.08,
+        "noise_sigma": 0.01,
+    }
+    return yaml.safe_dump(template, sort_keys=False, default_flow_style=False)
+
+
+def _build_manual_sample(base_dataset: ImmutableDataset, params: dict[str, Any]) -> dict[str, np.ndarray]:
+    model_type = base_dataset.config.get("model_type")
+    n_b = int(base_dataset.config.get("n_b", 16))
+
+    if model_type == "gaussian_2c":
+        from dexsy_core.forward_model import create_forward_model
+
+        fm = create_forward_model(n_d=n_b, n_b=n_b)
+        diffusions = np.asarray(
+            _coerce_float_list(params.get("diffusions", [1.0e-9, 2.0e-9]), expected_len=2, name="diffusions"),
+            dtype=np.float64,
+        )
+        fractions = np.asarray(
+            _coerce_float_list(params.get("volume_fractions", [0.6, 0.4]), expected_len=2, name="volume_fractions"),
+            dtype=np.float64,
+        )
+        fractions /= max(float(fractions.sum()), 1e-12)
+        exchange_rate = float(params.get("exchange_rate", params.get("exchange_rate_01", 2.0)))
+        mixing_time = float(params.get("mixing_time", 0.08))
+        noise_sigma = float(params.get("noise_sigma", 0.01))
+        jitter_pixels = int(params.get("jitter_pixels", 0))
+        smoothing_sigma = float(params.get("smoothing_sigma", 0.8))
+        spectrum, _, _ = fm.generate_2c_validation_spectrum(
+            diffusions=diffusions,
+            volume_fractions=fractions,
+            exchange_rate=exchange_rate,
+            mixing_time=mixing_time,
+            jitter_pixels=jitter_pixels,
+            smoothing_sigma=smoothing_sigma,
+        )
+        signal = fm.compute_signal(spectrum, noise_sigma=noise_sigma, normalize=True, noise_model="rician")
+        return {"signal": np.asarray(signal, dtype=np.float32), "spectrum": np.asarray(spectrum, dtype=np.float32)}
+
+    if model_type == "gaussian_3c":
+        from dexsy_core.forward_model import create_forward_model
+
+        fm = create_forward_model(n_d=n_b, n_b=n_b)
+        diffusions = np.asarray(
+            _coerce_float_list(params.get("diffusions", [0.8e-9, 1.7e-9, 2.8e-9]), expected_len=3, name="diffusions"),
+            dtype=np.float64,
+        )
+        fractions = np.asarray(
+            _coerce_float_list(params.get("volume_fractions", [0.5, 0.3, 0.2]), expected_len=3, name="volume_fractions"),
+            dtype=np.float64,
+        )
+        fractions /= max(float(fractions.sum()), 1e-12)
+        exchange_rates = _coerce_float_list(
+            params.get("exchange_rates", [2.0, 1.2, 0.8]),
+            expected_len=3,
+            name="exchange_rates",
+        )
+        mixing_time = float(params.get("mixing_time", 0.08))
+        noise_sigma = float(params.get("noise_sigma", 0.01))
+        jitter_pixels = int(params.get("jitter_pixels", 0))
+        smoothing_sigma = float(params.get("smoothing_sigma", 0.8))
+        spectrum, _, _ = fm.generate_3c_validation_spectrum(
+            diffusions=diffusions,
+            volume_fractions=fractions,
+            exchange_rates=(exchange_rates[0], exchange_rates[1], exchange_rates[2]),
+            mixing_time=mixing_time,
+            jitter_pixels=jitter_pixels,
+            smoothing_sigma=smoothing_sigma,
+        )
+        signal = fm.compute_signal(spectrum, noise_sigma=noise_sigma, normalize=True, noise_model="rician")
+        return {"signal": np.asarray(signal, dtype=np.float32), "spectrum": np.asarray(spectrum, dtype=np.float32)}
+
+    if model_type == "gaussian_nc":
+        from dexsy_core.forward_model_nc import create_forward_model_nc
+
+        n_comp = int(base_dataset.config.get("params", {}).get("n_compartments", 3))
+        fm = create_forward_model_nc(n_d=n_b, n_b=n_b)
+        diffusions = np.asarray(
+            _coerce_float_list(params.get("diffusions", np.geomspace(6e-10, 3e-9, n_comp).tolist()), expected_len=n_comp, name="diffusions"),
+            dtype=np.float64,
+        )
+        fractions = np.asarray(
+            _coerce_float_list(params.get("volume_fractions", [1.0 / n_comp] * n_comp), expected_len=n_comp, name="volume_fractions"),
+            dtype=np.float64,
+        )
+        fractions /= max(float(fractions.sum()), 1e-12)
+        exchange_rate = float(params.get("exchange_rate", 1.0))
+        kappa = np.full((n_comp, n_comp), 0.0, dtype=np.float64)
+        for i in range(n_comp):
+            for j in range(i + 1, n_comp):
+                kappa[i, j] = exchange_rate
+                kappa[j, i] = exchange_rate
+        mixing_time = float(params.get("mixing_time", 0.08))
+        noise_sigma = float(params.get("noise_sigma", 0.01))
+        spectrum, signal, _ = fm.generate_ncompartment_sample(
+            N=n_comp,
+            phi=fractions,
+            D=diffusions,
+            kappa=kappa,
+            mixing_time=mixing_time,
+            noise_sigma=noise_sigma,
+            normalize=True,
+        )
+        return {"signal": np.asarray(signal, dtype=np.float32), "spectrum": np.asarray(spectrum, dtype=np.float32)}
+
+    if model_type == "nongaussian_3c":
+        from dexsy_core.forward_model_3c_nongaussian import ForwardModel3CNonGaussian
+
+        cfg = base_dataset.config.get("params", {})
+        fm = ForwardModel3CNonGaussian(
+            n_b=n_b,
+            mixing_time_range=tuple(cfg.get("mixing_time_range", [0.015, 0.300])),
+        )
+        phi = np.asarray(_coerce_float_list(params.get("phi", [0.5, 0.3, 0.2]), expected_len=3, name="phi"), dtype=np.float64)
+        phi /= max(float(phi.sum()), 1e-12)
+        rates = {
+            "k_et": float(params.get("k_et", 1.0)),
+            "k_te": float(params.get("k_te", 1.0)),
+            "k_es": float(params.get("k_es", 1.0)),
+            "k_se": float(params.get("k_se", 1.0)),
+            "k_ts": float(params.get("k_ts", 0.0)),
+            "k_st": float(params.get("k_st", 0.0)),
+        }
+        signal_clean, details = fm.compute_signal(
+            phi=phi,
+            mixing_time=float(params.get("mixing_time", 0.08)),
+            extracellular_diffusivity=float(params.get("D_E", 1.8e-9)),
+            intracellular_diffusivity=float(params.get("D_I", 0.8e-9)),
+            axon_restricted_length=float(params.get("l_T", 1.2e-6)),
+            sphere_radius=float(params.get("R_S", 3.0e-6)),
+            rates=rates,
+            normalize=False,
+        )
+        signal = fm.add_rician_noise(
+            signal=signal_clean,
+            noise_sigma=float(params.get("noise_sigma", 0.01)),
+            normalize=True,
+        )
+        pathway = np.asarray(details["weight_matrix"], dtype=np.float32)
+        dei = np.float32(fm.compute_dei_from_weight_matrix(pathway))
+        return {
+            "signal": np.asarray(signal, dtype=np.float32),
+            "pathway_weights": pathway,
+            "dei": np.asarray(dei, dtype=np.float32),
+        }
+
+    raise ValueError(f"Manual append is not supported for model_type={model_type}")
+
+
+def _append_manual_sample_from_form(
+    base_path: str,
+    dataset_id: str,
+    target_split: str,
+    params_text: str,
+):
+    if not dataset_id:
+        rows, refresh_status, lab_dd, ext_dd, train_dd, compare_dd = _refresh_dataset_registry(base_path)
+        return rows, f"{refresh_status}\nPlease select a base dataset.", lab_dd, ext_dd, train_dd, compare_dd
+    try:
+        base = load_dataset(dataset_id, base_path=base_path, verify=False)
+        params = _parse_params_override_text(params_text)
+        sample = _build_manual_sample(base, params)
+
+        new_signals = np.concatenate([base.signals, sample["signal"][None, ...]], axis=0).astype(np.float32)
+        new_spectra = None
+        new_pathway = None
+        new_dei = None
+        if base.spectra is not None:
+            if "spectrum" not in sample:
+                raise ValueError("Manual sample must provide `spectrum` for reconstruction datasets.")
+            new_spectra = np.concatenate([base.spectra, sample["spectrum"][None, ...]], axis=0).astype(np.float32)
+        if base.pathway_weights is not None:
+            if "pathway_weights" not in sample:
+                raise ValueError("Manual sample must provide `pathway_weights` for pathway datasets.")
+            pw = sample["pathway_weights"]
+            if pw.ndim == 2:
+                pw = pw.reshape(1, 3, 3)
+            new_pathway = np.concatenate([base.pathway_weights, pw.astype(np.float32)], axis=0).astype(np.float32)
+            if base.dei is not None:
+                dei_val = float(np.asarray(sample.get("dei", 0.0)).reshape(-1)[0])
+                new_dei = np.concatenate([base.dei, np.asarray([dei_val], dtype=np.float32)], axis=0).astype(np.float32)
+
+        splits = {k: list(v) for k, v in base.splits.items()}
+        split_name = target_split if target_split in {"train", "val", "test"} else "train"
+        new_idx = int(new_signals.shape[0] - 1)
+        splits.setdefault(split_name, [])
+        splits[split_name].append(new_idx)
+
+        new_config = deepcopy(base.config)
+        if split_name == "train":
+            new_config["n_train"] = int(new_config.get("n_train", 0)) + 1
+        elif split_name == "val":
+            new_config["n_val"] = int(new_config.get("n_val", 0)) + 1
+        else:
+            new_config["n_test"] = int(new_config.get("n_test", 0)) + 1
+        new_config["manual_extension"] = {
+            "source_dataset_id": dataset_id,
+            "target_split": split_name,
+            "sample_hash": _hash_payload(_to_python_scalar(sample)),
+            "params_hash": _hash_payload(_to_python_scalar(params)),
+        }
+
+        new_dataset = ImmutableDataset(
+            dataset_id=compute_dataset_id(new_config),
+            signals=new_signals,
+            spectra=new_spectra,
+            pathway_weights=new_pathway,
+            dei=new_dei,
+            splits=splits,
+            config=_to_python_scalar(new_config),
+            metadata=dict(base.metadata),
+        )
+        save_dataset(new_dataset, base_path=base_path, generator_version="1.0.0")
+        status = (
+            f"Manual sample appended to `{split_name}`.\n"
+            f"New dataset: `{new_dataset.dataset_id}` (train={new_dataset.n_train}, val={new_dataset.n_val}, test={new_dataset.n_test})."
+        )
+    except Exception as exc:
+        status = f"Failed to append manual sample: {exc}"
 
     rows, refresh_status, lab_dd, ext_dd, train_dd, compare_dd = _refresh_dataset_registry(base_path)
     return rows, f"{refresh_status}\n{status}", lab_dd, ext_dd, train_dd, compare_dd
@@ -455,14 +792,31 @@ def _on_training_dataset_change(base_path: str, dataset_id: str):
 
 def _on_compare_dataset_change(base_path: str, dataset_id: str):
     if not dataset_id:
-        return gr.update(choices=[], value=[]), {}
+        return gr.update(choices=[], value=[]), {}, "Select a test dataset to load compatible runs."
     try:
         ds = load_dataset(dataset_id, base_path=base_path, verify=False)
-        model_keys = _models_for_dataset(ds)
         detail = _dataset_detail_json(base_path, dataset_id)
-        return gr.update(choices=_model_choices_from_keys(model_keys), value=model_keys[:1]), detail
+        rows = _load_history_rows()
+        choices = []
+        for row in rows:
+            if not _is_run_compatible_with_dataset(ds, row):
+                continue
+            ckpt = row.get("checkpoint_path")
+            if not ckpt or not Path(ckpt).exists():
+                continue
+            run_id = row.get("run_id")
+            if not run_id:
+                continue
+            label = (
+                f"{run_id} | {row.get('model_key', '?')} | "
+                f"name={row.get('run_name') or '-'} | train_ds={row.get('dataset_id', '?')}"
+            )
+            choices.append((label, run_id))
+        status = f"Loaded {len(choices)} compatible trained run(s) for dataset `{dataset_id}`."
+        values = [c[1] for c in choices[: min(4, len(choices))]]
+        return gr.update(choices=choices, value=values), detail, status
     except Exception as exc:
-        return gr.update(choices=[], value=[]), {"error": str(exc)}
+        return gr.update(choices=[], value=[]), {"error": str(exc)}, f"Failed to load compare runs: {exc}"
 
 
 def _run_id(prefix: str = "run") -> str:
@@ -580,6 +934,7 @@ def _train_single_run(
     dataset_id: str,
     base_path: str,
     model_key: str,
+    run_name: str,
     epochs: int,
     batch_size: int,
     learning_rate: float,
@@ -602,7 +957,8 @@ def _train_single_run(
     n_comp = _infer_dataset_n_compartments(ds)
     n_b = int(ds.config.get("n_b", 16))
 
-    run_id = _run_id("train")
+    run_prefix = f"train_{_sanitize_name(run_name)}" if str(run_name or "").strip() else "train"
+    run_id = _run_id(run_prefix)
     run_dir = RUNS_DIR_DEFAULT / run_id
     run_dir.mkdir(parents=True, exist_ok=True)
     started = time.time()
@@ -758,6 +1114,7 @@ def _train_single_run(
 
     manifest = {
         "run_id": run_id,
+        "run_name": str(run_name or "").strip(),
         "timestamp": _now_utc_iso(),
         "status": "completed",
         "dataset_id": dataset_id,
@@ -801,6 +1158,7 @@ def _run_training_ui(
     base_path: str,
     dataset_id: str,
     model_key: str,
+    run_name: str,
     epochs: int,
     batch_size: int,
     learning_rate: float,
@@ -828,6 +1186,7 @@ def _run_training_ui(
             dataset_id=dataset_id,
             base_path=base_path,
             model_key=model_key,
+            run_name=run_name,
             epochs=int(epochs),
             batch_size=int(batch_size),
             learning_rate=float(learning_rate),
@@ -856,33 +1215,219 @@ def _run_training_ui(
         return f"Training failed: {exc}", None, {}, {}
 
 
-def _parse_seed_list(seed_text: str) -> list[int]:
-    if not seed_text.strip():
-        return [42]
-    seeds = []
-    for part in seed_text.replace(" ", "").split(","):
-        if not part:
-            continue
-        seeds.append(int(part))
-    if not seeds:
-        seeds = [42]
-    return seeds
+def _is_run_compatible_with_dataset(dataset, run_row: dict[str, Any]) -> bool:
+    model_key = str(run_row.get("model_key", ""))
+    if not model_key:
+        return False
+    if dataset.task_type == "pathway_regression":
+        return model_key == "nonGaussian_cnn"
+
+    model_type = dataset.config.get("model_type")
+    if model_type == "gaussian_2c":
+        return model_key.startswith("2d_")
+    if model_type == "gaussian_3c":
+        return model_key.startswith("3d_")
+    if model_type == "gaussian_nc":
+        return model_key == "nd_attention_unet"
+    return False
 
 
-def _plot_compare_summary(summary_rows: list[dict[str, Any]], metric_key: str) -> plt.Figure | None:
-    if not summary_rows:
+def _normalize_state_dict_keys(state_dict: dict[str, Any]) -> dict[str, Any]:
+    if not state_dict:
+        return state_dict
+    keys = list(state_dict.keys())
+    if all(k.startswith("module.") for k in keys):
+        return {k[len("module."):]: v for k, v in state_dict.items()}
+    return state_dict
+
+
+def _load_model_state(model: torch.nn.Module, checkpoint_path: Path, device: torch.device) -> None:
+    ckpt = torch.load(str(checkpoint_path), map_location=device)
+    if isinstance(ckpt, dict) and "model_state_dict" in ckpt:
+        state_dict = ckpt["model_state_dict"]
+    elif isinstance(ckpt, dict) and all(torch.is_tensor(v) for v in ckpt.values()):
+        state_dict = ckpt
+    else:
+        raise ValueError(f"Unsupported checkpoint format: {checkpoint_path}")
+    state_dict = _normalize_state_dict_keys(state_dict)
+    missing, unexpected = model.load_state_dict(state_dict, strict=False)
+    allowed_missing = {"_K", "_Kt"}
+    for key in missing:
+        if key.endswith("denoise_scale"):
+            allowed_missing.add(key)
+    disallowed = [m for m in missing if m not in allowed_missing]
+    if disallowed:
+        preview = ", ".join(disallowed[:8])
+        raise RuntimeError(f"Checkpoint missing keys not allowed: {preview}")
+    if unexpected:
+        preview = ", ".join(unexpected[:8])
+        raise RuntimeError(f"Checkpoint has unexpected keys: {preview}")
+
+
+def _evaluate_reconstruction_checkpoint(
+    dataset,
+    model_key: str,
+    checkpoint_path: Path,
+    run_row: dict[str, Any],
+    batch_size_eval: int,
+) -> dict[str, float]:
+    from dexsy_core.forward_model import create_forward_model
+    from dexsy_core.forward_model_nc import create_forward_model_nc
+    from dexsy_core.preprocessing import build_model_inputs
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    cfg = dict(run_row.get("config", {}))
+    n_b = int(dataset.config.get("n_b", 16))
+    n_comp = _infer_dataset_n_compartments(dataset)
+    split = dataset.get_split("test")
+    labels = np.asarray(split["spectra"], dtype=np.float32).reshape(-1, 1, n_b, n_b)
+    signals = np.asarray(split["signals"], dtype=np.float32).reshape(-1, 1, n_b, n_b)
+    if model_key == "nd_attention_unet":
+        forward_model = create_forward_model_nc(n_d=n_b, n_b=n_b)
+    else:
+        forward_model = create_forward_model(n_d=n_b, n_b=n_b)
+    prepared_inputs = build_model_inputs(signals, forward_model).astype(np.float32)
+
+    if model_key == "2d_attention_unet":
+        from models_2d.attention_unet.model import AttentionUNet2D
+
+        model = AttentionUNet2D(in_channels=3, base_filters=int(cfg.get("base_filters", 32)))
+        model_inputs = prepared_inputs
+    elif model_key == "2d_plain_unet":
+        from models_2d.plain_unet.model import PlainUNet2D
+
+        model = PlainUNet2D(in_channels=3, base_filters=int(cfg.get("base_filters", 32)))
+        model_inputs = prepared_inputs
+    elif model_key == "2d_pinn":
+        from models_2d.pinn.model import PINN2D
+
+        model = PINN2D(signal_size=n_b, in_channels=3)
+        model_inputs = prepared_inputs
+    elif model_key == "2d_deep_unfolding":
+        from models_2d.deep_unfolding.model import DeepUnfolding2D
+
+        model = DeepUnfolding2D(
+            n_layers=int(cfg.get("n_layers", 12)),
+            n_d=n_b,
+            hidden_dim=int(cfg.get("hidden_dim", 256)),
+            use_denoiser=bool(cfg.get("use_denoiser", True)),
+        )
+        model.set_kernel_matrix(torch.from_numpy(forward_model.kernel_matrix).float().to(device))
+        model_inputs = signals
+    elif model_key == "2d_fno":
+        from models_2d.neural_operators.fno import FNO2D
+
+        model = FNO2D(
+            in_channels=3,
+            hidden_channels=int(cfg.get("fno_hidden_channels", 64)),
+            n_layers=int(cfg.get("fno_n_layers", 4)),
+            modes=int(cfg.get("fno_modes", 16)),
+        )
+        model_inputs = prepared_inputs
+    elif model_key == "2d_deeponet":
+        from models_2d.neural_operators.deeponet import DeepONet2D
+
+        model = DeepONet2D(signal_dim=n_b * n_b, grid_size=n_b)
+        model_inputs = prepared_inputs[:, 0:1]
+    elif model_key == "3d_attention_unet":
+        from models_3d.attention_unet.model import AttentionUNet3C
+
+        model = AttentionUNet3C(in_channels=3, base_filters=int(cfg.get("base_filters", 32)))
+        model_inputs = prepared_inputs
+    elif model_key == "3d_plain_unet":
+        from models_3d.plain_unet.model import PlainUNet3C
+
+        model = PlainUNet3C(in_channels=3, base_filters=int(cfg.get("base_filters", 32)))
+        model_inputs = prepared_inputs
+    elif model_key == "3d_pinn":
+        from models_3d.pinn.model import PINN3C
+
+        model = PINN3C(signal_size=n_b, in_channels=3)
+        model_inputs = prepared_inputs
+    elif model_key == "3d_deep_unfolding":
+        from models_3d.deep_unfolding.model import DeepUnfolding3C
+
+        model = DeepUnfolding3C(
+            n_layers=int(cfg.get("n_layers", 12)),
+            n_d=n_b,
+            hidden_dim=int(cfg.get("hidden_dim", 256)),
+            use_denoiser=bool(cfg.get("use_denoiser", True)),
+        )
+        model.set_kernel_matrix(torch.from_numpy(forward_model.kernel_matrix).float().to(device))
+        model_inputs = signals
+    elif model_key == "nd_attention_unet":
+        from models_nd.attention_unet.model import AttentionUNetND
+
+        model = AttentionUNetND(in_channels=3, base_filters=int(cfg.get("base_filters", 32)))
+        model_inputs = prepared_inputs
+    else:
+        raise ValueError(f"Unsupported reconstruction model key: {model_key}")
+
+    model = model.to(device)
+    _load_model_state(model, checkpoint_path=checkpoint_path, device=device)
+    model.eval()
+    preds = []
+    with torch.no_grad():
+        for i in range(0, len(model_inputs), int(batch_size_eval)):
+            batch = torch.from_numpy(model_inputs[i:i + int(batch_size_eval)]).float().to(device)
+            out = _extract_model_output_tensor(model(batch))
+            preds.append(out.detach().cpu().numpy().astype(np.float32))
+    y_pred = np.concatenate(preds, axis=0)
+    return {k: float(v) for k, v in compute_batch_metrics(labels, y_pred)["aggregate"].items()}
+
+
+def _evaluate_pathway_checkpoint(
+    dataset,
+    checkpoint_path: Path,
+    run_row: dict[str, Any],
+    batch_size_eval: int,
+) -> dict[str, float]:
+    from models_nonGaussian.cnn.model import NonGaussian3CInverseNet
+
+    split = dataset.get_split("test")
+    signals = np.asarray(split["signals"], dtype=np.float32)
+    if signals.ndim == 3:
+        signals = signals[:, None, :, :]
+    true_pathway = np.asarray(split["pathway_weights"], dtype=np.float32)
+    if true_pathway.ndim == 3:
+        true_pathway = true_pathway.reshape(true_pathway.shape[0], -1)
+    true_dei = np.asarray(split["dei"], dtype=np.float32).reshape(-1)
+    cfg = dict(run_row.get("config", {}))
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = NonGaussian3CInverseNet(
+        hidden_dim=int(cfg.get("hidden_dim", 256)),
+    ).to(device)
+    _load_model_state(model, checkpoint_path=checkpoint_path, device=device)
+    model.eval()
+
+    pred_pathway = []
+    pred_dei = []
+    with torch.no_grad():
+        for i in range(0, len(signals), int(batch_size_eval)):
+            x = torch.from_numpy(signals[i:i + int(batch_size_eval)]).float().to(device)
+            out = model(x)
+            pred_pathway.append(out.pathway_weights.detach().cpu().numpy().astype(np.float32))
+            pred_dei.append(out.dei.detach().cpu().numpy().astype(np.float32).reshape(-1))
+    pathway_arr = np.concatenate(pred_pathway, axis=0)
+    dei_arr = np.concatenate(pred_dei, axis=0)
+    return {
+        "pathway_mse": float(np.mean((pathway_arr - true_pathway) ** 2)),
+        "dei_error": float(np.mean(np.abs(dei_arr - true_dei))),
+    }
+
+
+def _plot_compare_summary(compare_rows: list[dict[str, Any]], metric_name: str) -> plt.Figure | None:
+    if not compare_rows:
         return None
-    names = [r["model_key"] for r in summary_rows]
-    means = [float(r["metric_mean"]) for r in summary_rows]
-    stds = [float(r["metric_std"]) for r in summary_rows]
-
-    fig, ax = plt.subplots(figsize=(max(8, len(names) * 1.5), 4.8))
-    x = np.arange(len(names))
-    ax.bar(x, means, yerr=stds, capsize=4, color="steelblue", alpha=0.85)
+    labels = [f"{r['run_id']}\n({r['model_key']})" for r in compare_rows]
+    values = [float(r["metric_value"]) for r in compare_rows]
+    fig, ax = plt.subplots(figsize=(max(8, len(compare_rows) * 1.4), 4.8))
+    x = np.arange(len(compare_rows))
+    ax.bar(x, values, color="steelblue", alpha=0.88)
     ax.set_xticks(x)
-    ax.set_xticklabels(names, rotation=25, ha="right")
-    ax.set_ylabel(metric_key)
-    ax.set_title(f"Fair Compare Summary ({metric_key}, mean ± std)")
+    ax.set_xticklabels(labels, rotation=30, ha="right")
+    ax.set_ylabel(metric_name)
+    ax.set_title(f"Fair Compare on Selected Test Dataset ({metric_name})")
     ax.grid(axis="y", alpha=0.3)
     fig.tight_layout()
     return fig
@@ -891,119 +1436,112 @@ def _plot_compare_summary(summary_rows: list[dict[str, Any]], metric_key: str) -
 def _run_fair_compare_ui(
     base_path: str,
     dataset_id: str,
-    model_keys: list[str],
-    seeds_text: str,
-    epochs: int,
-    batch_size: int,
-    learning_rate: float,
-    weight_decay: float,
-    early_stopping_patience: int,
-    base_filters: int,
-    n_layers: int,
-    hidden_dim: int,
-    use_denoiser: bool,
-    fno_hidden_channels: int,
-    fno_n_layers: int,
-    fno_modes: int,
-    lambda_dei: float,
-    n_restrict_terms: int,
+    run_ids: list[str],
+    batch_size_eval: int,
 ):
     if not dataset_id:
-        return "Please select a dataset first.", [], [], None
-    if not model_keys:
-        return "Please select at least one model.", [], [], None
+        return "Please select a test dataset first.", [], [], None
+    if not run_ids:
+        return "Please select trained runs to compare.", [], [], None
 
     try:
-        ds = load_dataset(dataset_id, base_path=base_path, verify=False)
-        seeds = _parse_seed_list(seeds_text)
-        metric_name = "pathway_mse" if ds.task_type == "pathway_regression" else "mse_mean"
+        dataset = load_dataset(dataset_id, base_path=base_path, verify=False)
+        if dataset.n_test <= 0:
+            return f"Dataset `{dataset_id}` has no test samples.", [], [], None
 
-        run_rows = []
-        for model_key in model_keys:
-            for seed in seeds:
-                manifest, _plot = _train_single_run(
-                    dataset_id=dataset_id,
-                    base_path=base_path,
-                    model_key=model_key,
-                    epochs=int(epochs),
-                    batch_size=int(batch_size),
-                    learning_rate=float(learning_rate),
-                    weight_decay=float(weight_decay),
-                    early_stopping_patience=int(early_stopping_patience),
-                    seed=int(seed),
-                    init_seed=int(seed),
-                    dataloader_seed=int(seed),
-                    base_filters=int(base_filters),
-                    n_layers=int(n_layers),
-                    hidden_dim=int(hidden_dim),
-                    use_denoiser=bool(use_denoiser),
-                    fno_hidden_channels=int(fno_hidden_channels),
-                    fno_n_layers=int(fno_n_layers),
-                    fno_modes=int(fno_modes),
-                    lambda_dei=float(lambda_dei),
-                    n_restrict_terms=int(n_restrict_terms),
-                )
-                test_metrics = manifest.get("test_metrics", {})
-                run_rows.append(
-                    {
-                        "run_id": manifest["run_id"],
-                        "dataset_id": dataset_id,
-                        "model_key": model_key,
-                        "seed": seed,
-                        "best_val_loss": manifest.get("best_val_loss"),
-                        "metric_name": metric_name,
-                        "metric_value": float(test_metrics.get(metric_name, np.nan)),
-                        "duration_s": float(manifest.get("duration_seconds", 0.0)),
-                    }
-                )
+        history_rows = _load_history_rows()
+        by_id = {str(r.get("run_id")): r for r in history_rows}
 
-        summary_rows = []
-        by_model: dict[str, list[float]] = {}
-        for row in run_rows:
-            by_model.setdefault(row["model_key"], []).append(float(row["metric_value"]))
-        for model_key, vals in by_model.items():
-            arr = np.asarray(vals, dtype=np.float64)
-            summary_rows.append(
+        compare_rows: list[dict[str, Any]] = []
+        for run_id in run_ids:
+            run = by_id.get(str(run_id))
+            if run is None:
+                continue
+            if not _is_run_compatible_with_dataset(dataset, run):
+                continue
+            ckpt_raw = run.get("checkpoint_path")
+            ckpt_path = Path(str(ckpt_raw))
+            if not ckpt_path.is_absolute():
+                ckpt_path = (ROOT / ckpt_path).resolve()
+            if not ckpt_path.exists():
+                continue
+
+            t0 = time.time()
+            if dataset.task_type == "pathway_regression":
+                metrics = _evaluate_pathway_checkpoint(
+                    dataset=dataset,
+                    checkpoint_path=ckpt_path,
+                    run_row=run,
+                    batch_size_eval=int(batch_size_eval),
+                )
+                metric_name = "pathway_mse"
+            else:
+                metrics = _evaluate_reconstruction_checkpoint(
+                    dataset=dataset,
+                    model_key=str(run.get("model_key")),
+                    checkpoint_path=ckpt_path,
+                    run_row=run,
+                    batch_size_eval=int(batch_size_eval),
+                )
+                metric_name = "mse_mean"
+            compare_rows.append(
                 {
-                    "model_key": model_key,
+                    "run_id": run.get("run_id"),
+                    "run_name": run.get("run_name") or "",
+                    "train_dataset_id": run.get("dataset_id"),
+                    "test_dataset_id": dataset_id,
+                    "model_key": run.get("model_key"),
                     "metric_name": metric_name,
-                    "metric_mean": float(np.nanmean(arr)),
-                    "metric_std": float(np.nanstd(arr)),
-                    "n_runs": int(arr.size),
+                    "metric_value": float(metrics.get(metric_name, np.nan)),
+                    "metrics": metrics,
+                    "eval_seconds": float(time.time() - t0),
+                    "checkpoint_path": str(ckpt_path),
                 }
             )
-        summary_rows.sort(key=lambda r: r["metric_mean"])
-        fig = _plot_compare_summary(summary_rows, metric_name)
 
-        summary_table = [
-            [
-                r["model_key"],
-                r["metric_name"],
-                r["metric_mean"],
-                r["metric_std"],
-                r["n_runs"],
-            ]
-            for r in summary_rows
-        ]
-        run_table = [
+        if not compare_rows:
+            return "No compatible/evaluable runs were found for this dataset.", [], [], None
+
+        compare_rows.sort(key=lambda r: float(r["metric_value"]))
+        metric_name = compare_rows[0]["metric_name"]
+
+        summary_by_model: dict[str, list[float]] = {}
+        for row in compare_rows:
+            summary_by_model.setdefault(str(row["model_key"]), []).append(float(row["metric_value"]))
+        summary_rows = []
+        for model_key, vals in summary_by_model.items():
+            arr = np.asarray(vals, dtype=np.float64)
+            summary_rows.append(
+                [
+                    model_key,
+                    metric_name,
+                    float(np.nanmean(arr)),
+                    float(np.nanstd(arr)),
+                    int(arr.size),
+                ]
+            )
+        summary_rows.sort(key=lambda r: float(r[2]))
+
+        run_rows = [
             [
                 r["run_id"],
-                r["dataset_id"],
+                r["run_name"],
+                r["train_dataset_id"],
+                r["test_dataset_id"],
                 r["model_key"],
-                r["seed"],
-                r["best_val_loss"],
                 r["metric_name"],
                 r["metric_value"],
-                r["duration_s"],
+                r["eval_seconds"],
+                r["checkpoint_path"],
             ]
-            for r in run_rows
+            for r in compare_rows
         ]
-
+        fig = _plot_compare_summary(compare_rows, metric_name)
         status = (
-            f"Fair compare completed on dataset `{dataset_id}`. "
-            f"Runs: {len(run_rows)} ({len(model_keys)} model(s) x {len(seeds)} seed(s))."
+            f"Fair compare completed on test dataset `{dataset_id}`.\n"
+            f"Evaluated {len(compare_rows)} trained run(s). Lower `{metric_name}` is better."
         )
-        return status, summary_table, run_table, fig
+        return status, summary_rows, run_rows, fig
     except Exception as exc:
         return f"Fair compare failed: {exc}", [], [], None
 
@@ -1094,13 +1632,14 @@ def build_app():
     compare_summary_headers = ["model_key", "metric_name", "metric_mean", "metric_std", "n_runs"]
     compare_run_headers = [
         "run_id",
-        "dataset_id",
+        "run_name",
+        "train_dataset_id",
+        "test_dataset_id",
         "model_key",
-        "seed",
-        "best_val_loss",
         "metric_name",
         "metric_value",
-        "duration_s",
+        "eval_seconds",
+        "checkpoint_path",
     ]
 
     with gr.Blocks(title="DEXSY Research Interface", theme=gr.themes.Soft()) as demo:
@@ -1111,7 +1650,7 @@ def build_app():
             This interface is built for:
             - immutable dataset management
             - reproducible training with explicit seeds
-            - fair model comparison on the same dataset
+            - fair model comparison across trained runs on one test dataset
             - persistent experiment history
             """
         )
@@ -1167,10 +1706,27 @@ def build_app():
                     create_seed = gr.Number(value=42, precision=0, label="Seed")
                     create_n_comp_nc = gr.Number(value=4, precision=0, label="n_comp (for gaussian_nc)")
                 with gr.Row():
+                    create_dataset_purpose = gr.Dropdown(
+                        label="Dataset Purpose",
+                        choices=list(COMPARE_DATASET_PURPOSES.keys()),
+                        value="train_val_test",
+                        info="`compare_test_only` will create test-only dataset (train/val forced to 0).",
+                    )
+                    create_sampling_strategy = gr.Dropdown(
+                        label="Sampling Strategy",
+                        choices=["log_uniform", "uniform"],
+                        value="log_uniform",
+                    )
+                with gr.Row():
                     create_n_train = gr.Number(value=9500, precision=0, label="n_train")
                     create_n_val = gr.Number(value=400, precision=0, label="n_val")
                     create_n_test = gr.Number(value=400, precision=0, label="n_test")
                     create_btn = gr.Button("Create Dataset", variant="primary")
+                create_params_override = gr.Textbox(
+                    label="Parameter Ranges (YAML/JSON Override)",
+                    lines=12,
+                    value=_default_params_yaml("gaussian_2c", 4),
+                )
                 create_status = gr.Textbox(label="Create Status", lines=3)
 
                 gr.Markdown("---")
@@ -1181,6 +1737,22 @@ def build_app():
                     extend_btn = gr.Button("Extend Dataset", variant="secondary")
                 extend_status = gr.Textbox(label="Extend Status", lines=3)
 
+                gr.Markdown("---")
+                gr.Markdown("### Append Manual Sample (one-by-one, via parameters)")
+                with gr.Row():
+                    append_target_split = gr.Dropdown(
+                        label="Append to Split",
+                        choices=["train", "val", "test"],
+                        value="train",
+                    )
+                    append_btn = gr.Button("Append Manual Sample", variant="secondary")
+                append_params_text = gr.Textbox(
+                    label="Manual Sample Parameters (YAML/JSON)",
+                    lines=10,
+                    value=_manual_sample_template(),
+                )
+                append_status = gr.Textbox(label="Append Status", lines=3)
+
             # ==========================================================
             # TAB 2: TRAINING RUNS
             # ==========================================================
@@ -1189,6 +1761,7 @@ def build_app():
                 with gr.Row():
                     train_dataset_id = gr.Dropdown(label="Dataset ID", choices=[])
                     train_model_key = gr.Dropdown(label="Model", choices=[])
+                    train_run_name = gr.Textbox(label="Run Name (optional)", placeholder="e.g. ablation_lr_low")
                 train_dataset_info = gr.JSON(label="Selected Dataset Snapshot")
 
                 with gr.Row():
@@ -1227,34 +1800,16 @@ def build_app():
             # TAB 3: FAIR COMPARE
             # ==========================================================
             with gr.TabItem("Fair Compare"):
-                gr.Markdown("### Compare models on the SAME dataset_id")
+                gr.Markdown("### Compare already-trained runs on one test dataset")
                 with gr.Row():
                     compare_dataset_id = gr.Dropdown(label="Dataset ID", choices=[])
-                    compare_models = gr.CheckboxGroup(label="Models", choices=[])
+                    compare_batch_size_eval = gr.Number(value=64, precision=0, label="Eval Batch Size")
                 compare_dataset_info = gr.JSON(label="Selected Dataset Snapshot")
-
-                with gr.Row():
-                    compare_seeds = gr.Textbox(value="42,43,44", label="Seeds (comma-separated)")
-                    compare_epochs = gr.Number(value=40, precision=0, label="Epochs")
-                    compare_batch_size = gr.Number(value=8, precision=0, label="Batch Size")
-                    compare_learning_rate = gr.Number(value=5e-4, label="Learning Rate")
-                with gr.Row():
-                    compare_weight_decay = gr.Number(value=1e-4, label="Weight Decay")
-                    compare_early_stop = gr.Number(value=10, precision=0, label="Early Stop Patience")
-
-                with gr.Accordion("Advanced Model Args", open=False):
-                    with gr.Row():
-                        compare_base_filters = gr.Number(value=32, precision=0, label="base_filters")
-                        compare_n_layers = gr.Number(value=12, precision=0, label="n_layers")
-                        compare_hidden_dim = gr.Number(value=256, precision=0, label="hidden_dim")
-                        compare_use_denoiser = gr.Checkbox(value=True, label="use_denoiser")
-                    with gr.Row():
-                        compare_fno_hidden_channels = gr.Number(value=64, precision=0, label="fno_hidden_channels")
-                        compare_fno_n_layers = gr.Number(value=4, precision=0, label="fno_n_layers")
-                        compare_fno_modes = gr.Number(value=16, precision=0, label="fno_modes")
-                    with gr.Row():
-                        compare_lambda_dei = gr.Number(value=1.0, label="lambda_dei (nonGaussian)")
-                        compare_n_restrict_terms = gr.Number(value=500, precision=0, label="n_restrict_terms (nonGaussian)")
+                compare_run_choices = gr.CheckboxGroup(
+                    label="Trained Runs (from history, compatible only)",
+                    choices=[],
+                )
+                compare_candidates_status = gr.Textbox(label="Run Selection Status", lines=2)
 
                 run_compare_btn = gr.Button("Run Fair Compare", variant="primary")
                 compare_status = gr.Textbox(label="Compare Status", lines=3)
@@ -1267,7 +1822,7 @@ def build_app():
                 )
                 compare_runs = gr.Dataframe(
                     headers=compare_run_headers,
-                    datatype=["str", "str", "str", "number", "number", "str", "number", "number"],
+                    datatype=["str", "str", "str", "str", "str", "str", "number", "number", "str"],
                     label="Per-Run Results",
                     interactive=False,
                     wrap=True,
@@ -1329,6 +1884,22 @@ def build_app():
             outputs=[preview_plot, preview_info],
         )
 
+        create_model_type.change(
+            fn=_on_create_model_change,
+            inputs=[create_model_type, create_n_comp_nc],
+            outputs=[create_params_override],
+        )
+        create_n_comp_nc.change(
+            fn=_on_create_model_change,
+            inputs=[create_model_type, create_n_comp_nc],
+            outputs=[create_params_override],
+        )
+        create_dataset_purpose.change(
+            fn=_on_create_purpose_change,
+            inputs=[create_dataset_purpose],
+            outputs=[create_n_train, create_n_val, create_n_test],
+        )
+
         create_btn.click(
             fn=_create_dataset_from_form,
             inputs=[
@@ -1340,6 +1911,9 @@ def build_app():
                 create_n_test,
                 create_seed,
                 create_n_comp_nc,
+                create_sampling_strategy,
+                create_dataset_purpose,
+                create_params_override,
             ],
             outputs=[
                 dataset_table,
@@ -1363,6 +1937,18 @@ def build_app():
                 compare_dataset_id,
             ],
         )
+        append_btn.click(
+            fn=_append_manual_sample_from_form,
+            inputs=[datasets_base_path, dataset_select_extend, append_target_split, append_params_text],
+            outputs=[
+                dataset_table,
+                append_status,
+                dataset_select_lab,
+                dataset_select_extend,
+                train_dataset_id,
+                compare_dataset_id,
+            ],
+        )
 
         train_dataset_id.change(
             fn=_on_training_dataset_change,
@@ -1375,6 +1961,7 @@ def build_app():
                 datasets_base_path,
                 train_dataset_id,
                 train_model_key,
+                train_run_name,
                 train_epochs,
                 train_batch_size,
                 train_learning_rate,
@@ -1399,29 +1986,15 @@ def build_app():
         compare_dataset_id.change(
             fn=_on_compare_dataset_change,
             inputs=[datasets_base_path, compare_dataset_id],
-            outputs=[compare_models, compare_dataset_info],
+            outputs=[compare_run_choices, compare_dataset_info, compare_candidates_status],
         )
         run_compare_btn.click(
             fn=_run_fair_compare_ui,
             inputs=[
                 datasets_base_path,
                 compare_dataset_id,
-                compare_models,
-                compare_seeds,
-                compare_epochs,
-                compare_batch_size,
-                compare_learning_rate,
-                compare_weight_decay,
-                compare_early_stop,
-                compare_base_filters,
-                compare_n_layers,
-                compare_hidden_dim,
-                compare_use_denoiser,
-                compare_fno_hidden_channels,
-                compare_fno_n_layers,
-                compare_fno_modes,
-                compare_lambda_dei,
-                compare_n_restrict_terms,
+                compare_run_choices,
+                compare_batch_size_eval,
             ],
             outputs=[compare_status, compare_summary, compare_runs, compare_plot],
         )
@@ -1456,10 +2029,15 @@ def build_app():
             inputs=[],
             outputs=[history_table, history_status, history_run_select],
         )
+        demo.load(
+            fn=_on_compare_dataset_change,
+            inputs=[datasets_base_path, compare_dataset_id],
+            outputs=[compare_run_choices, compare_dataset_info, compare_candidates_status],
+        )
 
     return demo
 
 
 if __name__ == "__main__":
     app = build_app()
-    app.launch(server_name="0.0.0.0", server_port=7861)
+    app.launch(server_name="0.0.0.0", server_port=7861, share=True)

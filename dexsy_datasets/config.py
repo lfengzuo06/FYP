@@ -189,12 +189,14 @@ def validate_config(config: Union[Dict[str, Any], DatasetConfig]) -> List[str]:
     n_val = config.get("n_val", 0)
     n_test = config.get("n_test", 0)
 
-    if n_train <= 0:
-        errors.append(f"n_train must be positive, got {n_train}")
+    if n_train < 0:
+        errors.append(f"n_train must be non-negative, got {n_train}")
     if n_val < 0:
         errors.append(f"n_val must be non-negative, got {n_val}")
     if n_test < 0:
         errors.append(f"n_test must be non-negative, got {n_test}")
+    if (n_train + n_val + n_test) <= 0:
+        errors.append("At least one of n_train/n_val/n_test must be > 0.")
 
     n_b = config.get("n_b")
     if n_b not in [16, 64]:
