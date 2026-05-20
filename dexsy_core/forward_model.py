@@ -356,32 +356,38 @@ class ForwardModel2D:
         self._kernel = kernel.astype(np.float32)
         self.kernel_matrix = self._kernel.reshape(self.n_b * self.n_b, self.n_d * self.n_d)
 
-    def _sample_log_uniform(self, value_range: tuple) -> float:
+    def _sample_log_uniform(self, value_range: tuple, rng=None) -> float:
         """Sample one value uniformly in log space."""
         low, high = value_range
+        if rng is not None:
+            return float(np.exp(rng.uniform(np.log(low), np.log(high))))
         return float(np.exp(np.random.uniform(np.log(low), np.log(high))))
 
-    def _sample_uniform(self, value_range: tuple) -> float:
+    def _sample_uniform(self, value_range: tuple, rng=None) -> float:
         """Sample one value uniformly in linear space."""
         low, high = value_range
+        if rng is not None:
+            return float(rng.uniform(low, high))
         return float(np.random.uniform(low, high))
 
-    def _sample_noise_sigma(self, noise_sigma: float = None, noise_sigma_range: tuple = (0.005, 0.015)) -> float:
+    def _sample_noise_sigma(self, noise_sigma: float = None, noise_sigma_range: tuple = (0.005, 0.015), rng=None) -> float:
         """Sample noise sigma uniformly, matching the paper protocol."""
         if noise_sigma is not None:
             return float(noise_sigma)
-        return self._sample_uniform(noise_sigma_range)
+        return self._sample_uniform(noise_sigma_range, rng=rng)
 
-    def _sample_mixing_time(self, mixing_time: float = None) -> float:
+    def _sample_mixing_time(self, mixing_time: float = None, rng=None) -> float:
         """Sample mixing time in seconds."""
         if mixing_time is not None:
             return float(mixing_time)
-        return self._sample_log_uniform(self.mixing_time_range)
+        return self._sample_log_uniform(self.mixing_time_range, rng=rng)
 
-    def _sample_exchange_rate(self, exchange_rate: float = None) -> float:
+    def _sample_exchange_rate(self, exchange_rate: float = None, rng=None) -> float:
         """Sample exchange rate from a logarithmic grid."""
         if exchange_rate is not None:
             return float(exchange_rate)
+        if rng is not None:
+            return float(rng.choice(self.exchange_rate_grid))
         return float(np.random.choice(self.exchange_rate_grid))
 
     def _exchange_probability(self, rate: float, mixing_time: float) -> float:
@@ -393,7 +399,7 @@ class ForwardModel2D:
         log_grid = np.log(self.D1)
         return int(np.argmin(np.abs(log_grid - np.log(diffusion_value))))
 
-    def _sample_compartment_diffusions(self, compartment_names: tuple[str, ...]) -> np.ndarray:
+    def _sample_compartment_diffusions(self, compartment_names: tuple[str, ...], rng=None) -> np.ndarray:
         """
         Sample compartment diffusivities while keeping them distinct on the
         reconstruction grid so the intended peaks remain separable.
@@ -402,7 +408,7 @@ class ForwardModel2D:
 
         for _ in range(256):
             diffusions = np.array(
-                [self._sample_log_uniform(self.compartment_ranges[name]) for name in compartment_names],
+                [self._sample_log_uniform(self.compartment_ranges[name], rng=rng) for name in compartment_names],
                 dtype=np.float64,
             )
             indices = np.array([self._nearest_diffusion_index(d) for d in diffusions], dtype=int)
@@ -413,11 +419,14 @@ class ForwardModel2D:
 
         return diffusions
 
-    def _jitter_index(self, idx: int, jitter_pixels: int) -> int:
+    def _jitter_index(self, idx: int, jitter_pixels: int, rng=None) -> int:
         """Apply bounded integer jitter to a grid index."""
         if jitter_pixels <= 0:
             return idx
-        offset = int(np.random.randint(-jitter_pixels, jitter_pixels + 1))
+        if rng is not None:
+            offset = int(rng.integers(-jitter_pixels, jitter_pixels + 1))
+        else:
+            offset = int(np.random.randint(-jitter_pixels, jitter_pixels + 1))
         return int(np.clip(idx + offset, 0, self.n_d - 1))
 
     def _build_weight_matrix(self, volume_fractions: np.ndarray, exchange_probs: np.ndarray) -> tuple[np.ndarray, float]:
@@ -469,6 +478,7 @@ class ForwardModel2D:
         weight_matrix: np.ndarray,
         jitter_pixels: int = None,
         smoothing_sigma: float = None,
+        rng=None,
     ) -> tuple:
         """
         Project a compartment-level weight matrix onto the 2D D-grid.
@@ -480,11 +490,14 @@ class ForwardModel2D:
         if jitter_pixels is None:
             jitter_pixels = self.jitter_pixels
         if smoothing_sigma is None:
-            smoothing_sigma = float(np.random.uniform(*self.smoothing_sigma_range))
+            if rng is not None:
+                smoothing_sigma = float(rng.uniform(*self.smoothing_sigma_range))
+            else:
+                smoothing_sigma = float(np.random.uniform(*self.smoothing_sigma_range))
 
         spectrum = np.zeros((self.n_d, self.n_d), dtype=np.float64)
         base_indices = [self._nearest_diffusion_index(d) for d in diffusions]
-        jittered_indices = [self._jitter_index(idx, jitter_pixels) for idx in base_indices]
+        jittered_indices = [self._jitter_index(idx, jitter_pixels, rng=rng) for idx in base_indices]
 
         if self.spectral_broadening_mode == "directional":
             sigma = float(smoothing_sigma)
@@ -534,6 +547,7 @@ class ForwardModel2D:
         rician: bool = True,
         normalize: bool = None,
         noise_model: str = "rician",
+        rng=None,
     ) -> np.ndarray:
         """
         Compute a DEXSY signal from a diffusion distribution.
@@ -550,14 +564,25 @@ class ForwardModel2D:
             if noise_model is None:
                 noise_model = "rician" if rician else "gaussian"
             if noise_model == "rician":
-                noise_real = np.random.randn(*s.shape).astype(np.float32) * noise_sigma
-                noise_imag = np.random.randn(*s.shape).astype(np.float32) * noise_sigma
+                if rng is not None:
+                    noise_real = rng.standard_normal(s.shape).astype(np.float32) * noise_sigma
+                    noise_imag = rng.standard_normal(s.shape).astype(np.float32) * noise_sigma
+                else:
+                    noise_real = np.random.randn(*s.shape).astype(np.float32) * noise_sigma
+                    noise_imag = np.random.randn(*s.shape).astype(np.float32) * noise_sigma
                 s = np.sqrt((s + noise_real) ** 2 + noise_imag ** 2)
             elif noise_model == "gaussian":
-                s = s + np.random.randn(*s.shape).astype(np.float32) * noise_sigma
+                if rng is not None:
+                    s = s + rng.standard_normal(s.shape).astype(np.float32) * noise_sigma
+                else:
+                    s = s + np.random.randn(*s.shape).astype(np.float32) * noise_sigma
             elif noise_model == "legacy_uniform":
-                noise_real = -2.0 * noise_sigma * np.random.rand(*s.shape).astype(np.float32)
-                noise_imag = -2.0 * noise_sigma * np.random.rand(*s.shape).astype(np.float32)
+                if rng is not None:
+                    noise_real = -2.0 * noise_sigma * rng.uniform(0, 1, s.shape).astype(np.float32)
+                    noise_imag = -2.0 * noise_sigma * rng.uniform(0, 1, s.shape).astype(np.float32)
+                else:
+                    noise_real = -2.0 * noise_sigma * np.random.rand(*s.shape).astype(np.float32)
+                    noise_imag = -2.0 * noise_sigma * np.random.rand(*s.shape).astype(np.float32)
                 s = np.sqrt((s + noise_real) ** 2 + noise_imag ** 2)
             else:
                 raise ValueError(f"Unknown noise model: {noise_model}")
@@ -578,6 +603,7 @@ class ForwardModel2D:
         mixing_time: float,
         jitter_pixels: int = None,
         smoothing_sigma: float = None,
+        rng=None,
     ) -> tuple:
         """Generate a broadened paper-style 2D spectrum and metadata."""
         exchange_probs = np.zeros_like(exchange_rates, dtype=np.float64)
@@ -593,6 +619,7 @@ class ForwardModel2D:
             weight_matrix=weight_matrix,
             jitter_pixels=jitter_pixels,
             smoothing_sigma=smoothing_sigma,
+            rng=rng,
         )
         return spectrum, weight_matrix, exchange_probs, used_sigma, exchange_scale, jittered_indices
 
@@ -607,14 +634,18 @@ class ForwardModel2D:
         jitter_pixels: int = None,
         smoothing_sigma: float = None,
         return_reference_signal: bool = False,
+        rng=None,
     ) -> tuple:
         """Generate one paper-style 2-compartment DEXSY sample."""
-        mixing_time = self._sample_mixing_time(mixing_time)
-        noise_sigma = self._sample_noise_sigma(noise_sigma, noise_sigma_range)
+        mixing_time = self._sample_mixing_time(mixing_time, rng=rng)
+        noise_sigma = self._sample_noise_sigma(noise_sigma, noise_sigma_range, rng=rng)
 
-        diffusions = self._sample_compartment_diffusions(("intracellular", "extracellular"))
-        volume_fractions = np.random.dirichlet(np.array([2.0, 2.0], dtype=np.float64))
-        rate = self._sample_exchange_rate(exchange_rate)
+        diffusions = self._sample_compartment_diffusions(("intracellular", "extracellular"), rng=rng)
+        if rng is not None:
+            volume_fractions = rng.dirichlet(np.array([2.0, 2.0], dtype=np.float64))
+        else:
+            volume_fractions = np.random.dirichlet(np.array([2.0, 2.0], dtype=np.float64))
+        rate = self._sample_exchange_rate(exchange_rate, rng=rng)
 
         exchange_rates = np.zeros((2, 2), dtype=np.float64)
         exchange_rates[0, 1] = rate
@@ -627,9 +658,10 @@ class ForwardModel2D:
             mixing_time=mixing_time,
             jitter_pixels=jitter_pixels,
             smoothing_sigma=smoothing_sigma,
+            rng=rng,
         )
-        clean_signal = self.compute_signal(f, noise_sigma=0.0, normalize=normalize, noise_model=None)
-        s = self.compute_signal(f, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model)
+        clean_signal = self.compute_signal(f, noise_sigma=0.0, normalize=normalize, noise_model=None, rng=rng)
+        s = self.compute_signal(f, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model, rng=rng)
 
         params = {
             "n_compartments": 2,
@@ -662,18 +694,22 @@ class ForwardModel2D:
         jitter_pixels: int = None,
         smoothing_sigma: float = None,
         return_reference_signal: bool = False,
+        rng=None,
     ) -> tuple:
         """Generate one paper-style 3-compartment DEXSY sample with nine peaks."""
-        mixing_time = self._sample_mixing_time(mixing_time)
-        noise_sigma = self._sample_noise_sigma(noise_sigma, noise_sigma_range)
+        mixing_time = self._sample_mixing_time(mixing_time, rng=rng)
+        noise_sigma = self._sample_noise_sigma(noise_sigma, noise_sigma_range, rng=rng)
 
-        diffusions = self._sample_compartment_diffusions(("intracellular", "extracellular", "fast"))
-        volume_fractions = np.random.dirichlet(np.array([2.0, 2.0, 2.0], dtype=np.float64))
+        diffusions = self._sample_compartment_diffusions(("intracellular", "extracellular", "fast"), rng=rng)
+        if rng is not None:
+            volume_fractions = rng.dirichlet(np.array([2.0, 2.0, 2.0], dtype=np.float64))
+        else:
+            volume_fractions = np.random.dirichlet(np.array([2.0, 2.0, 2.0], dtype=np.float64))
 
         if exchange_rates is None:
-            rate_01 = self._sample_exchange_rate()
-            rate_02 = self._sample_exchange_rate()
-            rate_12 = self._sample_exchange_rate()
+            rate_01 = self._sample_exchange_rate(rng=rng)
+            rate_02 = self._sample_exchange_rate(rng=rng)
+            rate_12 = self._sample_exchange_rate(rng=rng)
         else:
             rate_01, rate_02, rate_12 = exchange_rates
 
@@ -689,9 +725,10 @@ class ForwardModel2D:
             mixing_time=mixing_time,
             jitter_pixels=jitter_pixels,
             smoothing_sigma=smoothing_sigma,
+            rng=rng,
         )
-        clean_signal = self.compute_signal(f, noise_sigma=0.0, normalize=normalize, noise_model=None)
-        s = self.compute_signal(f, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model)
+        clean_signal = self.compute_signal(f, noise_sigma=0.0, normalize=normalize, noise_model=None, rng=rng)
+        s = self.compute_signal(f, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model, rng=rng)
 
         params = {
             "n_compartments": 3,
@@ -746,6 +783,7 @@ class ForwardModel2D:
         noise_model: str = "rician",
         normalize: bool = None,
         return_reference_signal: bool = False,
+        rng=None,
     ) -> tuple:
         """
         Generate one N-compartment DEXSY sample with arbitrary N (2-7).
@@ -766,6 +804,7 @@ class ForwardModel2D:
             noise_model: "rician", "gaussian", or "none".
             normalize: Whether to normalize signal.
             return_reference_signal: If True, also return clean signal.
+            rng: Random number generator for reproducibility.
 
         Returns:
             f: 2D spectrum (n_d, n_d).
@@ -783,6 +822,7 @@ class ForwardModel2D:
                 jitter_pixels=jitter_pixels,
                 smoothing_sigma=smoothing_sigma,
                 return_reference_signal=return_reference_signal,
+                rng=rng,
             )
         elif N == 3:
             return self.generate_3compartment_paper(
@@ -794,25 +834,29 @@ class ForwardModel2D:
                 jitter_pixels=jitter_pixels,
                 smoothing_sigma=smoothing_sigma,
                 return_reference_signal=return_reference_signal,
+                rng=rng,
             )
 
         # For N > 3, use a generic approach
         if N < 2:
             raise ValueError("N must be at least 2")
 
-        mixing_time = self._sample_mixing_time(mixing_time)
-        noise_sigma = self._sample_noise_sigma(noise_sigma, noise_sigma_range)
+        mixing_time = self._sample_mixing_time(mixing_time, rng=rng)
+        noise_sigma = self._sample_noise_sigma(noise_sigma, noise_sigma_range, rng=rng)
 
         # Sample volume fractions (Dirichlet)
         if phi is None:
-            phi = np.random.dirichlet(np.ones(N) * 2.0)
+            if rng is not None:
+                phi = rng.dirichlet(np.ones(N) * 2.0)
+            else:
+                phi = np.random.dirichlet(np.ones(N) * 2.0)
 
         # Sample diffusion values
         if D is None:
             # Cycle through compartment ranges
             ranges = list(self.compartment_ranges.values())
             D = np.array([
-                self._sample_log_uniform(ranges[i % len(ranges)])
+                self._sample_log_uniform(ranges[i % len(ranges)], rng=rng)
                 for i in range(N)
             ], dtype=np.float64)
 
@@ -821,7 +865,7 @@ class ForwardModel2D:
             kappa = np.zeros((N, N), dtype=np.float64)
             for i in range(N):
                 for j in range(i + 1, N):
-                    rate = self._sample_exchange_rate()
+                    rate = self._sample_exchange_rate(rng=rng)
                     kappa[i, j] = rate
                     kappa[j, i] = rate
 
@@ -843,14 +887,15 @@ class ForwardModel2D:
             weight_matrix=weight_matrix,
             jitter_pixels=effective_jitter,
             smoothing_sigma=smoothing_sigma,
+            rng=rng,
         )
 
         # Compute signals
         clean_signal = self.compute_signal(
-            spectrum, noise_sigma=0.0, normalize=normalize, noise_model=None
+            spectrum, noise_sigma=0.0, normalize=normalize, noise_model=None, rng=rng
         )
         noisy_signal = self.compute_signal(
-            spectrum, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model
+            spectrum, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model, rng=rng
         )
 
         # Build params dictionary
@@ -897,6 +942,7 @@ class ForwardModel2D:
         noise_sigma_range: tuple = (0.005, 0.015),
         n_compartments: int = 2,
         return_reference_signal: bool = False,
+        seed: int = None,
         **kwargs,
     ) -> tuple:
         """
@@ -908,8 +954,11 @@ class ForwardModel2D:
             noise_sigma_range: Paper-style continuous noise range.
             n_compartments: Number of compartments (2-7).
             return_reference_signal: Whether to return clean signals.
+            seed: Random seed for reproducibility (uses np.random.default_rng).
             **kwargs: Passed to the selected generator.
         """
+        rng = np.random.default_rng(seed)
+
         F = np.zeros((n_samples, self.n_d, self.n_d), dtype=np.float32)
         S = np.zeros((n_samples, self.n_b, self.n_b), dtype=np.float32)
         S_clean = np.zeros((n_samples, self.n_b, self.n_b), dtype=np.float32) if return_reference_signal else None
@@ -921,6 +970,7 @@ class ForwardModel2D:
                 noise_sigma=noise_sigma,
                 noise_sigma_range=noise_sigma_range,
                 return_reference_signal=return_reference_signal,
+                rng=rng,
                 **kwargs,
             )
             if return_reference_signal:

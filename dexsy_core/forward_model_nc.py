@@ -251,26 +251,32 @@ class ForwardModelNC:
         self.A1 = np.exp(-self.b1[:, None] * self.D[None, :])  # (n_b, n_d)
         self.A2 = np.exp(-self.b2[:, None] * self.D[None, :])  # (n_b, n_d)
 
-    def _sample_log_uniform(self, value_range: tuple[float, float]) -> float:
+    def _sample_log_uniform(self, value_range: tuple[float, float], rng=None) -> float:
         """Sample one value uniformly in log space."""
         low, high = value_range
+        if rng is not None:
+            return float(np.exp(rng.uniform(np.log(low), np.log(high))))
         return float(np.exp(np.random.uniform(np.log(low), np.log(high))))
 
-    def _sample_uniform(self, value_range: tuple[float, float]) -> float:
+    def _sample_uniform(self, value_range: tuple[float, float], rng=None) -> float:
         """Sample one value uniformly in linear space."""
         low, high = value_range
+        if rng is not None:
+            return float(rng.uniform(low, high))
         return float(np.random.uniform(low, high))
 
-    def _sample_mixing_time(self, mixing_time: Optional[float] = None) -> float:
+    def _sample_mixing_time(self, mixing_time: Optional[float] = None, rng=None) -> float:
         """Sample mixing time in seconds."""
         if mixing_time is not None:
             return float(mixing_time)
-        return self._sample_log_uniform(self.mixing_time_range)
+        return self._sample_log_uniform(self.mixing_time_range, rng=rng)
 
-    def _sample_exchange_rate(self, exchange_rate: Optional[float] = None) -> float:
+    def _sample_exchange_rate(self, exchange_rate: Optional[float] = None, rng=None) -> float:
         """Sample exchange rate from a logarithmic grid."""
         if exchange_rate is not None:
             return float(exchange_rate)
+        if rng is not None:
+            return float(rng.choice(self.exchange_rate_grid))
         return float(np.random.choice(self.exchange_rate_grid))
 
     def _nearest_diffusion_index(self, diffusion_value: float) -> int:
@@ -278,12 +284,15 @@ class ForwardModelNC:
         log_grid = np.log(self.D)
         return int(np.argmin(np.abs(log_grid - np.log(diffusion_value))))
 
-    def _jitter_index(self, idx: int, jitter_pixels: Optional[int] = None) -> int:
+    def _jitter_index(self, idx: int, jitter_pixels: Optional[int] = None, rng=None) -> int:
         """Apply bounded integer jitter to a grid index."""
         jitter_pixels = self.jitter_pixels if jitter_pixels is None else jitter_pixels
         if jitter_pixels <= 0:
             return idx
-        offset = int(np.random.randint(-jitter_pixels, jitter_pixels + 1))
+        if rng is not None:
+            offset = int(rng.integers(-jitter_pixels, jitter_pixels + 1))
+        else:
+            offset = int(np.random.randint(-jitter_pixels, jitter_pixels + 1))
         return int(np.clip(idx + offset, 0, self.n_d - 1))
 
     def build_weight_matrix(
@@ -369,6 +378,7 @@ class ForwardModelNC:
         jitter_indices: Optional[list[int]] = None,
         smoothing_sigma: Optional[float] = None,
         mode: Optional[str] = None,
+        rng=None,
     ) -> np.ndarray:
         """
         Project compartment weight matrix to 2D diffusion grid.
@@ -381,6 +391,7 @@ class ForwardModelNC:
             jitter_indices: Jittered grid indices for each compartment.
             smoothing_sigma: Gaussian smoothing sigma.
             mode: Projection mode - "directional" or "isotropic".
+            rng: Random number generator for reproducibility.
 
         Returns:
             f: 2D spectrum of shape (n_d, n_d).
@@ -388,7 +399,10 @@ class ForwardModelNC:
         if mode is None:
             mode = self.spectral_broadening_mode
         if smoothing_sigma is None:
-            smoothing_sigma = float(np.random.uniform(*self.smoothing_sigma_range))
+            if rng is not None:
+                smoothing_sigma = float(rng.uniform(*self.smoothing_sigma_range))
+            else:
+                smoothing_sigma = float(np.random.uniform(*self.smoothing_sigma_range))
 
         N = W.shape[0]
         spectrum = np.zeros((self.n_d, self.n_d), dtype=np.float64)
@@ -396,7 +410,7 @@ class ForwardModelNC:
         # Get or compute jittered indices
         if jitter_indices is None:
             base_indices = [self._nearest_diffusion_index(d) for d in D]
-            jitter_indices = [self._jitter_index(idx, self.jitter_pixels) for idx in base_indices]
+            jitter_indices = [self._jitter_index(idx, self.jitter_pixels, rng=rng) for idx in base_indices]
 
         if mode == "directional":
             sigma = float(smoothing_sigma)
@@ -478,6 +492,7 @@ class ForwardModelNC:
         noise_sigma: float = 0.0,
         noise_model: str = "rician",
         normalize: Optional[bool] = None,
+        rng=None,
     ) -> np.ndarray:
         """
         Compute DEXSY signal from diffusion distribution.
@@ -491,6 +506,7 @@ class ForwardModelNC:
             noise_sigma: Standard deviation of noise.
             noise_model: "rician", "gaussian", or "none".
             normalize: Whether to normalize signal.
+            rng: Random number generator for reproducibility.
 
         Returns:
             S: Signal of shape (n_b, n_b).
@@ -502,11 +518,18 @@ class ForwardModelNC:
         # Step 9: Add noise
         if noise_sigma > 0:
             if noise_model == "rician":
-                noise_real = np.random.randn(*S.shape).astype(np.float32) * noise_sigma
-                noise_imag = np.random.randn(*S.shape).astype(np.float32) * noise_sigma
+                if rng is not None:
+                    noise_real = rng.standard_normal(S.shape).astype(np.float32) * noise_sigma
+                    noise_imag = rng.standard_normal(S.shape).astype(np.float32) * noise_sigma
+                else:
+                    noise_real = np.random.randn(*S.shape).astype(np.float32) * noise_sigma
+                    noise_imag = np.random.randn(*S.shape).astype(np.float32) * noise_sigma
                 S = np.sqrt((S + noise_real) ** 2 + noise_imag ** 2)
             elif noise_model == "gaussian":
-                S = S + np.random.randn(*S.shape).astype(np.float32) * noise_sigma
+                if rng is not None:
+                    S = S + rng.standard_normal(S.shape).astype(np.float32) * noise_sigma
+                else:
+                    S = S + np.random.randn(*S.shape).astype(np.float32) * noise_sigma
             elif noise_model == "none":
                 pass
             else:
@@ -534,6 +557,7 @@ class ForwardModelNC:
         noise_model: str = "rician",
         normalize: Optional[bool] = None,
         return_reference_signal: bool = False,
+        rng=None,
     ) -> tuple:
         """
         Generate one N-compartment DEXSY sample.
@@ -550,6 +574,7 @@ class ForwardModelNC:
             noise_model: "rician", "gaussian", or "none".
             normalize: Whether to normalize.
             return_reference_signal: If True, also return clean signal.
+            rng: Random number generator for reproducibility.
 
         Returns:
             f: 2D spectrum (n_d, n_d).
@@ -561,23 +586,26 @@ class ForwardModelNC:
             raise ValueError("N must be at least 2")
 
         # Sample mixing time and noise
-        mixing_time = self._sample_mixing_time(mixing_time)
-        noise_sigma = self._sample_noise_sigma(noise_sigma)
+        mixing_time = self._sample_mixing_time(mixing_time, rng=rng)
+        noise_sigma = self._sample_noise_sigma(noise_sigma, rng=rng)
 
         # Sample volume fractions (Dirichlet)
         if phi is None:
-            phi = np.random.dirichlet(np.ones(N) * 2.0)
+            if rng is not None:
+                phi = rng.dirichlet(np.ones(N) * 2.0)
+            else:
+                phi = np.random.dirichlet(np.ones(N) * 2.0)
 
         # Determine effective jitter_pixels (use instance default if not specified)
         effective_jitter = self.jitter_pixels if jitter_pixels is None else jitter_pixels
 
         # Sample diffusion values (pass effective jitter for proper separation calculation)
         if D is None:
-            D = self._sample_compartment_diffusions(N, jitter_pixels=effective_jitter)
+            D = self._sample_compartment_diffusions(N, jitter_pixels=effective_jitter, rng=rng)
 
         # Sample exchange rates
         if kappa is None:
-            kappa = self._sample_exchange_rate_matrix(N)
+            kappa = self._sample_exchange_rate_matrix(N, rng=rng)
 
         # Build weight matrix (Steps 3-6)
         W, lam, p = self.build_weight_matrix(N, phi, kappa, mixing_time)
@@ -588,11 +616,12 @@ class ForwardModelNC:
             D=D,
             jitter_pixels=jitter_pixels,
             smoothing_sigma=smoothing_sigma,
+            rng=rng,
         )
 
         # Compute signals (Steps 8-10)
-        S_clean = self.compute_signal(f, noise_sigma=0.0, normalize=normalize, noise_model="none")
-        S = self.compute_signal(f, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model)
+        S_clean = self.compute_signal(f, noise_sigma=0.0, normalize=normalize, noise_model="none", rng=rng)
+        S = self.compute_signal(f, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model, rng=rng)
 
         # Build params dictionary
         params = self._build_params_dict(
@@ -613,16 +642,17 @@ class ForwardModelNC:
             return f, S, params, S_clean
         return f, S, params
 
-    def _sample_noise_sigma(self, noise_sigma: Optional[float] = None) -> float:
+    def _sample_noise_sigma(self, noise_sigma: Optional[float] = None, rng=None) -> float:
         """Sample noise sigma."""
         if noise_sigma is not None:
             return float(noise_sigma)
-        return self._sample_uniform((0.005, 0.015))
+        return self._sample_uniform((0.005, 0.015), rng=rng)
 
     def _sample_compartment_diffusions(
         self,
         N: int,
         jitter_pixels: Optional[int] = None,
+        rng=None,
     ) -> np.ndarray:
         """
         Sample compartment diffusivities while keeping them distinct on the grid.
@@ -640,7 +670,7 @@ class ForwardModelNC:
 
         for i in range(N):
             range_idx = i % n_ranges
-            d = self._sample_log_uniform(ranges[range_idx])
+            d = self._sample_log_uniform(ranges[range_idx], rng=rng)
             diffusions.append(d)
 
         diffusions = np.array(diffusions, dtype=np.float64)
@@ -665,7 +695,7 @@ class ForwardModelNC:
             # Resample
             for i in range(N):
                 range_idx = i % n_ranges
-                diffusions[i] = self._sample_log_uniform(ranges[range_idx])
+                diffusions[i] = self._sample_log_uniform(ranges[range_idx], rng=rng)
                 indices[i] = self._nearest_diffusion_index(diffusions[i])
 
         # Fallback: use deterministic log-spaced placement if random fails
@@ -698,12 +728,12 @@ class ForwardModelNC:
 
         return diffusions
 
-    def _sample_exchange_rate_matrix(self, N: int) -> np.ndarray:
+    def _sample_exchange_rate_matrix(self, N: int, rng=None) -> np.ndarray:
         """Sample a symmetric exchange rate matrix."""
         kappa = np.zeros((N, N), dtype=np.float64)
         for i in range(N):
             for j in range(i + 1, N):
-                rate = self._sample_exchange_rate()
+                rate = self._sample_exchange_rate(rng=rng)
                 kappa[i, j] = rate
                 kappa[j, i] = rate
         return kappa
@@ -714,18 +744,22 @@ class ForwardModelNC:
         D: np.ndarray,
         jitter_pixels: Optional[int] = None,
         smoothing_sigma: Optional[float] = None,
+        rng=None,
     ) -> tuple:
         """Project weight matrix to diffusion grid with jitter and smoothing."""
         if jitter_pixels is None:
             jitter_pixels = self.jitter_pixels
         if smoothing_sigma is None:
-            smoothing_sigma = float(np.random.uniform(*self.smoothing_sigma_range))
+            if rng is not None:
+                smoothing_sigma = float(rng.uniform(*self.smoothing_sigma_range))
+            else:
+                smoothing_sigma = float(np.random.uniform(*self.smoothing_sigma_range))
 
         N = W.shape[0]
         base_indices = [self._nearest_diffusion_index(d) for d in D]
-        jitter_indices = [self._jitter_index(idx, jitter_pixels) for idx in base_indices]
+        jitter_indices = [self._jitter_index(idx, jitter_pixels, rng=rng) for idx in base_indices]
 
-        f = self.project_to_diffusion_grid(W, D, jitter_indices, smoothing_sigma)
+        f = self.project_to_diffusion_grid(W, D, jitter_indices, smoothing_sigma, rng=rng)
 
         return f, float(smoothing_sigma), tuple(jitter_indices)
 
@@ -780,6 +814,7 @@ class ForwardModelNC:
         noise_sigma: Optional[float] = None,
         noise_sigma_range: Optional[tuple[float, float]] = None,
         return_reference_signal: bool = False,
+        seed: int = None,
         **kwargs,
     ) -> tuple:
         """
@@ -791,6 +826,7 @@ class ForwardModelNC:
             noise_sigma: Fixed noise level.
             noise_sigma_range: Range for random noise sampling (low, high).
             return_reference_signal: Whether to return clean signals.
+            seed: Random seed for reproducibility (uses np.random.default_rng).
             **kwargs: Passed to generate_ncompartment_sample.
 
         Returns:
@@ -799,6 +835,8 @@ class ForwardModelNC:
             params_list: List of parameter dicts.
             [S_clean]: Optional clean signals.
         """
+        rng = np.random.default_rng(seed)
+
         F = np.zeros((n_samples, self.n_d, self.n_d), dtype=np.float32)
         S = np.zeros((n_samples, self.n_b, self.n_b), dtype=np.float32)
         S_clean = (
@@ -808,25 +846,21 @@ class ForwardModelNC:
         )
         params_list = []
 
-        # Sample noise levels if range is provided
-        if noise_sigma_range is not None and noise_sigma is None:
-            noise_sigmas = np.random.uniform(noise_sigma_range[0], noise_sigma_range[1], n_samples)
-        else:
-            noise_sigmas = [noise_sigma] * n_samples
-
         for i in range(n_samples):
             if return_reference_signal:
                 f, s, params, clean = self.generate_ncompartment_sample(
                     N=N,
-                    noise_sigma=noise_sigmas[i],
+                    noise_sigma=noise_sigma,
                     return_reference_signal=True,
+                    rng=rng,
                     **kwargs,
                 )
                 S_clean[i] = clean
             else:
                 f, s, params = self.generate_ncompartment_sample(
                     N=N,
-                    noise_sigma=noise_sigmas[i],
+                    noise_sigma=noise_sigma,
+                    rng=rng,
                     **kwargs,
                 )
             F[i] = f

@@ -702,7 +702,7 @@ class ForwardModel3CNonGaussian:
                 "generator_q": np.asarray(details["generator_q"], dtype=np.float64).tolist(),
                 "weight_matrix": np.asarray(details["weight_matrix"], dtype=np.float64).tolist(),
                 "pathway_weights": dict(details["pathway_weights"]),
-                "dei_weight_matrix": float(dei),
+                "theoretical_dei": float(dei),
             }
             params.update(rate_metadata)
             params_list.append(params)

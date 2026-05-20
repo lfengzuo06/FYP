@@ -35,7 +35,7 @@ _root = Path(__file__).parent.parent.parent
 if str(_root) not in sys.path:
     sys.path.insert(0, str(_root))
 
-from dexsy_core.forward_model import ForwardModel2D
+from dexsy_core.forward_model import ForwardModel2D, create_forward_model
 from dexsy_core.preprocessing import build_model_inputs
 
 from .model import PINN3C, PINNLoss3C
@@ -144,10 +144,14 @@ def train_model(
     noise_sigma_range: tuple = (0.005, 0.015),
     n_compartments: int = 3,
     seed: int = 42,
+    init_seed: int = None,
+    dataloader_seed: int = None,
     device: str = None,
     checkpoint_path: str = None,
     n_d: int = 64,
     n_b: int = 64,
+    dataset_id: str = None,
+    datasets_dir: str = "datasets",
 ) -> tuple:
     """
     Train a PINN model on 3C DEXSY.
@@ -167,15 +171,24 @@ def train_model(
         reduce_lr_factor: Reduce LR factor
         noise_sigma_range: Noise sigma range
         n_compartments: Number of compartments (3)
-        seed: Random seed
+        seed: Random seed for data generation
+        init_seed: Seed for model initialization (defaults to seed)
+        dataloader_seed: Seed for dataloader shuffling (defaults to seed)
         device: Device to use ('cuda', 'cpu', or None for auto)
         checkpoint_path: Optional path to load existing weights
         n_d: Grid size for diffusion dimension
         n_b: Grid size for b-value dimension
+        dataset_id: Pre-generated dataset ID (loads from disk instead of generating)
+        datasets_dir: Base directory for datasets (when using dataset_id)
         
     Returns:
         (model, history, datasets, forward_model)
     """
+    if init_seed is None:
+        init_seed = seed
+    if dataloader_seed is None:
+        dataloader_seed = seed
+
     if output_dir is None:
         output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / f"pinn_3c_g{n_d}"
     else:
@@ -198,20 +211,68 @@ def train_model(
     print(f"Learning rate: {learning_rate}, Weight decay: {weight_decay}")
     print(f"Compartments: {n_compartments}")
 
-    # Forward model
-    forward_model = ForwardModel2D(n_d=n_d, n_b=n_b)
+    if dataset_id is not None:
+        from dexsy_datasets import load_dataset as load_dexsy_dataset
 
-    # Generate datasets
-    print(f"\nGenerating 3C datasets (n_compartments={n_compartments})...")
-    datasets = generate_dataset(
-        forward_model=forward_model,
-        n_train=n_train,
-        n_val=n_val,
-        n_test=n_test,
-        noise_sigma_range=noise_sigma_range,
-        n_compartments=n_compartments,
-        seed=seed,
-    )
+        print(f"\nLoading pre-generated dataset: {dataset_id}")
+        dataset = load_dexsy_dataset(dataset_id, base_path=datasets_dir)
+        if dataset.task_type != "reconstruction":
+            raise ValueError(
+                f"Dataset {dataset_id} has task_type='{dataset.task_type}', "
+                f"but this model expects task_type='reconstruction'"
+            )
+
+        train_split = dataset.get_split("train")
+        val_split = dataset.get_split("val")
+        test_split = dataset.get_split("test")
+
+        n_b = int(dataset.config.get("n_b", n_b))
+        n_d = int(dataset.config.get("n_d", dataset.config.get("n_b", n_d)))
+        n_compartments = int(dataset.metadata.get("n_compartments", n_compartments))
+        forward_model = create_forward_model(n_d=n_d, n_b=n_b)
+
+        train_signals = train_split["signals"].reshape(-1, 1, n_b, n_b).astype(np.float32)
+        val_signals = val_split["signals"].reshape(-1, 1, n_b, n_b).astype(np.float32)
+        test_signals = test_split["signals"].reshape(-1, 1, n_b, n_b).astype(np.float32)
+
+        datasets = {
+            "train": {
+                "inputs": build_model_inputs(train_signals, forward_model),
+                "signals": train_signals,
+                "clean_signals": train_signals,
+                "labels": train_split["spectra"].reshape(-1, 1, n_d, n_d).astype(np.float32),
+            },
+            "val": {
+                "inputs": build_model_inputs(val_signals, forward_model),
+                "signals": val_signals,
+                "clean_signals": val_signals,
+                "labels": val_split["spectra"].reshape(-1, 1, n_d, n_d).astype(np.float32),
+            },
+            "test": {
+                "inputs": build_model_inputs(test_signals, forward_model),
+                "signals": test_signals,
+                "clean_signals": test_signals,
+                "labels": test_split["spectra"].reshape(-1, 1, n_d, n_d).astype(np.float32),
+            },
+        }
+        print(
+            f"  Loaded {len(dataset.signals)} samples "
+            f"(train={dataset.n_train}, val={dataset.n_val}, test={dataset.n_test})"
+        )
+    else:
+        forward_model = create_forward_model(n_d=n_d, n_b=n_b)
+        print(f"\nGenerating 3C datasets (n_compartments={n_compartments})...")
+        datasets = generate_dataset(
+            forward_model=forward_model,
+            n_train=n_train,
+            n_val=n_val,
+            n_test=n_test,
+            noise_sigma_range=noise_sigma_range,
+            n_compartments=n_compartments,
+            seed=seed,
+        )
+
+    set_seed(init_seed)
 
     # Create datasets
     train_dataset = DEXSYDataset3C(
@@ -233,7 +294,9 @@ def train_model(
         augment=False,
     )
 
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0)
+    g = torch.Generator()
+    g.manual_seed(dataloader_seed)
+    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, num_workers=0, generator=g)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False, num_workers=0)
 
@@ -438,6 +501,10 @@ def main():
 
     parser = argparse.ArgumentParser(description="Train PINN on 3C DEXSY")
     parser.add_argument('--output_dir', type=str, default=None, help='Output directory')
+    parser.add_argument('--dataset_id', type=str, default=None,
+                        help='Pre-generated dataset ID (loads from disk instead of generating)')
+    parser.add_argument('--datasets_dir', type=str, default='datasets',
+                        help='Base directory for datasets (when using --dataset_id)')
     parser.add_argument('--n_train', type=int, default=9500, help='Number of training samples')
     parser.add_argument('--n_val', type=int, default=400, help='Number of validation samples')
     parser.add_argument('--n_test', type=int, default=100, help='Number of test samples')
@@ -445,12 +512,21 @@ def main():
     parser.add_argument('--batch_size', type=int, default=8, help='Batch size')
     parser.add_argument('--lr', type=float, default=1e-3, help='Learning rate')
     parser.add_argument('--seed', type=int, default=42, help='Random seed')
+    parser.add_argument('--init_seed', type=int, default=None,
+                        help='Seed for model initialization (defaults to same as --seed)')
+    parser.add_argument('--dataloader_seed', type=int, default=None,
+                        help='Seed for dataloader shuffling (defaults to same as --seed)')
     parser.add_argument('--n_d', type=int, default=64, help='Grid size for diffusion dimension')
     parser.add_argument('--n_b', type=int, default=64, help='Grid size for b-value dimension')
     args = parser.parse_args()
 
+    init_seed = args.init_seed if args.init_seed is not None else args.seed
+    dataloader_seed = args.dataloader_seed if args.dataloader_seed is not None else args.seed
+
     train_model(
         output_dir=args.output_dir,
+        dataset_id=args.dataset_id,
+        datasets_dir=args.datasets_dir,
         n_train=args.n_train,
         n_val=args.n_val,
         n_test=args.n_test,
@@ -459,6 +535,8 @@ def main():
         learning_rate=args.lr,
         n_compartments=3,
         seed=args.seed,
+        init_seed=init_seed,
+        dataloader_seed=dataloader_seed,
         n_d=args.n_d,
         n_b=args.n_b,
     )

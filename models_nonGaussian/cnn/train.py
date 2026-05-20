@@ -282,7 +282,12 @@ def generate_nongaussian_inverse_splits(
     return {"train": train, "val": val, "test": test}
 
 
-def _make_loader(split: dict, batch_size: int, shuffle: bool) -> DataLoader:
+def _make_loader(
+    split: dict,
+    batch_size: int,
+    shuffle: bool,
+    generator: torch.Generator | None = None,
+) -> DataLoader:
     ds = NonGaussian3CDataset(
         signals=split["signals_noisy"],
         pathway_weights=split["pathway_weights"],
@@ -294,6 +299,7 @@ def _make_loader(split: dict, batch_size: int, shuffle: bool) -> DataLoader:
         shuffle=bool(shuffle),
         num_workers=0,
         pin_memory=torch.cuda.is_available(),
+        generator=generator,
     )
 
 
@@ -369,12 +375,19 @@ def train_nongaussian_inverse_model(
     n_b: int = 16,
     n_restrict_terms: int = 500,
     seed: int = 42,
+    init_seed: int | None = None,
+    dataloader_seed: int | None = None,
     device: str | None = None,
     checkpoint_path: str | None = None,
+    dataset_id: str | None = None,
+    datasets_dir: str = "datasets",
     sample_kwargs: dict | None = None,
 ) -> tuple[NonGaussian3CInverseNet, dict, dict, ForwardModel3CNonGaussian, Path]:
     """Train inverse model directly on sampled 3C non-Gaussian data."""
-    set_seed(int(seed))
+    if init_seed is None:
+        init_seed = seed
+    if dataloader_seed is None:
+        dataloader_seed = seed
 
     if output_dir is None:
         output_dir = Path(__file__).resolve().parents[2] / "checkpoints_nonGaussian" / f"inverse_3c_g{int(n_b)}"
@@ -391,24 +404,65 @@ def train_nongaussian_inverse_model(
     else:
         device_t = torch.device(device)
 
-    forward_model = ForwardModel3CNonGaussian(
-        n_b=int(n_b),
-        n_restrict_terms=int(n_restrict_terms),
-    )
+    if dataset_id is not None:
+        from dexsy_datasets import load_dataset as load_dexsy_dataset
 
-    datasets = generate_nongaussian_inverse_splits(
-        forward_model=forward_model,
-        n_train=int(n_train),
-        n_val=int(n_val),
-        n_test=int(n_test),
-        seed=int(seed),
-        sample_kwargs=sample_kwargs,
-    )
+        print(f"[NonGaussian-3C] loading pre-generated dataset: {dataset_id}")
+        dataset = load_dexsy_dataset(dataset_id, base_path=datasets_dir)
+        if dataset.task_type != "pathway_regression":
+            raise ValueError(
+                f"Dataset {dataset_id} has task_type='{dataset.task_type}', "
+                f"but this model expects task_type='pathway_regression'"
+            )
 
-    train_loader = _make_loader(datasets["train"], batch_size=batch_size, shuffle=True)
+        n_b = int(dataset.config.get("n_b", n_b))
+        forward_model = ForwardModel3CNonGaussian(
+            n_b=int(n_b),
+            n_restrict_terms=int(n_restrict_terms),
+        )
+
+        def _as_split(split_name: str) -> dict:
+            split = dataset.get_split(split_name)
+            pathway = np.asarray(split["pathway_weights"], dtype=np.float32)
+            if pathway.ndim == 3 and pathway.shape[-2:] == (3, 3):
+                pathway = pathway.reshape(pathway.shape[0], -1)
+            elif pathway.ndim != 2:
+                pathway = pathway.reshape(pathway.shape[0], -1)
+            dei = split["dei"] if "dei" in split else None
+            return {
+                "signals_noisy": np.asarray(split["signals"], dtype=np.float32),
+                "signals_clean": np.asarray(split["signals"], dtype=np.float32),
+                "pathway_weights": np.asarray(pathway, dtype=np.float32),
+                "dei": None if dei is None else np.asarray(dei, dtype=np.float32),
+            }
+
+        datasets = {
+            "train": _as_split("train"),
+            "val": _as_split("val"),
+            "test": _as_split("test"),
+        }
+    else:
+        set_seed(int(seed))
+        forward_model = ForwardModel3CNonGaussian(
+            n_b=int(n_b),
+            n_restrict_terms=int(n_restrict_terms),
+        )
+        datasets = generate_nongaussian_inverse_splits(
+            forward_model=forward_model,
+            n_train=int(n_train),
+            n_val=int(n_val),
+            n_test=int(n_test),
+            seed=int(seed),
+            sample_kwargs=sample_kwargs,
+        )
+
+    g = torch.Generator()
+    g.manual_seed(int(dataloader_seed))
+    train_loader = _make_loader(datasets["train"], batch_size=batch_size, shuffle=True, generator=g)
     val_loader = _make_loader(datasets["val"], batch_size=batch_size, shuffle=False)
     test_loader = _make_loader(datasets["test"], batch_size=batch_size, shuffle=False)
 
+    set_seed(int(init_seed))
     model = NonGaussian3CInverseNet(
         base_channels=int(base_channels),
         hidden_dim=int(hidden_dim),
@@ -572,6 +626,9 @@ def train_nongaussian_inverse_model(
             "n_b": int(n_b),
             "n_restrict_terms": int(n_restrict_terms),
             "seed": int(seed),
+            "init_seed": int(init_seed),
+            "dataloader_seed": int(dataloader_seed),
+            "dataset_id": dataset_id,
             "device": str(device_t),
         },
     }
@@ -613,14 +670,30 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--n-b", type=int, default=16)
     parser.add_argument("--n-restrict-terms", type=int, default=500)
     parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--init-seed", type=int, default=None)
+    parser.add_argument("--dataloader-seed", type=int, default=None)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--output-dir", type=str, default=None)
+    parser.add_argument(
+        "--dataset-id",
+        type=str,
+        default=None,
+        help="Pre-generated dataset ID (loads from disk instead of generating)",
+    )
+    parser.add_argument(
+        "--datasets-dir",
+        type=str,
+        default="datasets",
+        help="Base directory for datasets (when using --dataset-id)",
+    )
     return parser
 
 
 def main() -> None:
     parser = _build_arg_parser()
     args = parser.parse_args()
+    init_seed = args.init_seed if args.init_seed is not None else args.seed
+    dataloader_seed = args.dataloader_seed if args.dataloader_seed is not None else args.seed
     train_nongaussian_inverse_model(
         output_dir=args.output_dir,
         n_train=args.n_train,
@@ -637,7 +710,11 @@ def main() -> None:
         n_b=args.n_b,
         n_restrict_terms=args.n_restrict_terms,
         seed=args.seed,
+        init_seed=init_seed,
+        dataloader_seed=dataloader_seed,
         device=args.device,
+        dataset_id=args.dataset_id,
+        datasets_dir=args.datasets_dir,
     )
 
 
