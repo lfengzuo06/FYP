@@ -46,6 +46,7 @@ from improved_2d_dexsy import (
     to_serializable,
 )
 from dexsy_core.metrics import compute_metrics_dict
+from dexsy_datasets import load_dataset as load_repro_dataset
 
 # Model grid size support mapping
 MODEL_GRID_SUPPORT = {
@@ -151,6 +152,202 @@ CHECKPOINT_CHOICES_3D = [
 ]
 CHECKPOINT_CHOICES = CHECKPOINT_CHOICES_2D + CHECKPOINT_CHOICES_3D
 
+DATASETS_BASE_DEFAULT = ROOT / "datasets"
+RUN_HISTORY_DEFAULT = ROOT / "outputs" / "research_runs" / "history.jsonl"
+
+RUN_MODEL_TO_INFERENCE_MODEL = {
+    "2d_attention_unet": "attention_unet",
+    "2d_plain_unet": "plain_unet",
+    "2d_pinn": "pinn",
+    "2d_deep_unfolding": "deep_unfolding",
+    "2d_fno": "fno",
+    "2d_deeponet": "deeponet",
+    "3d_attention_unet": "attention_unet_3c",
+    "3d_plain_unet": "plain_unet_3c",
+    "3d_pinn": "pinn_3c",
+    "3d_deep_unfolding": "deep_unfolding_3c",
+}
+
+
+def _list_dataset_ids(base_path: str) -> list[str]:
+    base = Path(base_path)
+    if not base.exists():
+        return []
+    ids: list[str] = []
+    for item in sorted(base.iterdir()):
+        if not item.is_dir():
+            continue
+        if (item / "config.yaml").exists() and (item / "metadata.json").exists():
+            ids.append(item.name)
+    return ids
+
+
+def _refresh_dataset_choices(base_path: str):
+    dataset_ids = _list_dataset_ids(base_path)
+    first = dataset_ids[0] if dataset_ids else None
+    status = f"Loaded {len(dataset_ids)} dataset(s) from `{base_path}`."
+    return gr.update(choices=dataset_ids, value=first), status
+
+
+def _infer_dataset_n_compartments(dataset) -> int:
+    meta_n = dataset.metadata.get("n_compartments")
+    if meta_n is not None:
+        return int(meta_n)
+    model_type = dataset.config.get("model_type", "")
+    if model_type == "gaussian_2c":
+        return 2
+    if model_type in ("gaussian_3c", "nongaussian_3c"):
+        return 3
+    if model_type == "gaussian_nc":
+        return int(dataset.config.get("params", {}).get("n_compartments", 3))
+    return 2
+
+
+def _load_dataset_sample(base_path: str, dataset_id: str, split_name: str, sample_index: int):
+    if not dataset_id:
+        return None, {"error": "Please select a dataset first."}, None, gr.update()
+
+    try:
+        dataset = load_repro_dataset(dataset_id, base_path=base_path, verify=False)
+        split = dataset.get_split(split_name)
+        signals = np.asarray(split["signals"], dtype=np.float32)
+        if len(signals) == 0:
+            raise ValueError(f"Split '{split_name}' is empty.")
+
+        idx = int(np.clip(sample_index, 0, len(signals) - 1))
+        signal = np.asarray(signals[idx], dtype=np.float32)
+        if signal.ndim == 3:
+            signal = signal[0]
+
+        ground_truth = None
+        if "spectra" in split:
+            gt = np.asarray(split["spectra"][idx], dtype=np.float32)
+            if gt.ndim == 3:
+                gt = gt[0]
+            ground_truth = gt
+
+        n_comp = _infer_dataset_n_compartments(dataset)
+        grid_size = int(dataset.config.get("n_b", signal.shape[-1]))
+        params = {
+            "source": "historical_dataset",
+            "dataset_id": dataset_id,
+            "split": split_name,
+            "sample_index": idx,
+            "task_type": dataset.task_type,
+            "model_type": dataset.config.get("model_type"),
+            "seed": dataset.config.get("seed"),
+            "n_b": grid_size,
+        }
+
+        result = SignalInputResult(
+            signal=signal.astype(np.float32),
+            ground_truth=None if ground_truth is None else ground_truth.astype(np.float32),
+            params=params,
+            input_method="dataset",
+            n_compartments=n_comp,
+            grid_size=grid_size,
+        )
+        fig, _summary = _generate_preview_plot(result)
+        info = {
+            "dataset_id": dataset_id,
+            "split": split_name,
+            "sample_index": idx,
+            "grid_size": grid_size,
+            "n_compartments": n_comp,
+            "has_ground_truth": ground_truth is not None,
+            "signal_shape": list(signal.shape),
+            "signal_min": float(signal.min()),
+            "signal_max": float(signal.max()),
+            "signal_mean": float(signal.mean()),
+        }
+        return fig, info, asdict(result), gr.update(value=grid_size)
+    except Exception as exc:
+        return None, {"error": str(exc)}, None, gr.update()
+
+
+def _load_history_entries(history_path: str) -> list[dict[str, Any]]:
+    path = Path(history_path)
+    if not path.exists():
+        return []
+    rows: list[dict[str, Any]] = []
+    with open(path, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            rows.append(row)
+    rows.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return rows
+
+
+def _refresh_history_run_choices(history_path: str):
+    entries = _load_history_entries(history_path)
+    choices = []
+    kept = 0
+    for row in entries:
+        model_key = row.get("model_key")
+        checkpoint = row.get("checkpoint_path")
+        if model_key not in RUN_MODEL_TO_INFERENCE_MODEL:
+            continue
+        if not checkpoint or not Path(checkpoint).exists():
+            continue
+        run_id = row.get("run_id")
+        if not run_id:
+            continue
+        label = f"{run_id} | {model_key} | dataset={row.get('dataset_id', '?')}"
+        choices.append((label, run_id))
+        kept += 1
+    status = f"Loaded {kept} inference-compatible run(s) from `{history_path}`."
+    value = choices[0][1] if choices else None
+    return gr.update(choices=choices, value=value), status
+
+
+def _apply_history_run_selection(history_path: str, run_id: str):
+    if not run_id:
+        return (
+            gr.update(),
+            gr.update(),
+            "Please select a run first.",
+            {},
+        )
+    rows = _load_history_entries(history_path)
+    selected = None
+    for row in rows:
+        if row.get("run_id") == run_id:
+            selected = row
+            break
+    if selected is None:
+        return gr.update(), gr.update(), f"Run `{run_id}` not found.", {}
+
+    model_key = selected.get("model_key")
+    model_name = RUN_MODEL_TO_INFERENCE_MODEL.get(model_key)
+    if model_name is None:
+        return gr.update(), gr.update(), f"Run `{run_id}` model `{model_key}` is not inference-supported here.", selected
+
+    checkpoint = selected.get("checkpoint_path")
+    if not checkpoint or not Path(checkpoint).exists():
+        return gr.update(), gr.update(), f"Checkpoint path missing or not found: {checkpoint}", selected
+
+    filtered_choices = _get_model_filtered_checkpoints(model_name)
+    choices = filtered_choices if filtered_choices else CHECKPOINT_CHOICES
+    if checkpoint not in choices:
+        choices = [checkpoint] + choices
+
+    status = (
+        f"Loaded run `{run_id}`.\n"
+        f"Model set to `{model_name}`, checkpoint set to `{checkpoint}`."
+    )
+    return (
+        gr.update(value=model_name),
+        gr.update(choices=choices, value=checkpoint),
+        status,
+        selected,
+    )
+
 
 def _get_model_filtered_checkpoints(model_name: str) -> list[str]:
     """Get checkpoint choices filtered to a specific model folder."""
@@ -203,7 +400,7 @@ class SignalInputResult:
     signal: np.ndarray
     ground_truth: np.ndarray | None
     params: dict
-    input_method: str  # "params" | "random" | "image"
+    input_method: str  # "params" | "random" | "image" | "dataset"
     n_compartments: int = 2  # 2 or 3
     grid_size: int = 64  # Grid size (16 or 64)
 
@@ -574,7 +771,10 @@ def _run_inference(
         else:
             checkpoint_path = None
     elif checkpoint_name:
-        if is_3c:
+        candidate = Path(checkpoint_name)
+        if candidate.is_absolute() and candidate.exists():
+            checkpoint_path = candidate.resolve()
+        elif is_3c:
             checkpoint_path = (CHECKPOINTS_DIR_3D / checkpoint_name).resolve()
         else:
             checkpoint_path = (CHECKPOINTS_DIR / checkpoint_name).resolve()
@@ -848,6 +1048,36 @@ def build_app():
                                 preview_plot_upload = gr.Plot(label="Uploaded Signal Preview")
                                 preview_info_upload = gr.JSON(label="Signal Info")
 
+                    # --- Tab 1D: Historical Dataset Sample ---
+                    with gr.TabItem("Historical Dataset Sample"):
+                        gr.Markdown("Load one sample from an immutable historical dataset (reproducible input).")
+                        with gr.Row():
+                            with gr.Column(scale=1):
+                                dataset_base_path = gr.Textbox(
+                                    label="Datasets Base Path",
+                                    value=str(DATASETS_BASE_DEFAULT),
+                                )
+                                btn_refresh_datasets = gr.Button("Refresh Datasets", variant="secondary")
+                                dataset_refresh_status = gr.Textbox(label="Dataset Registry Status", lines=2)
+                                dataset_id_select = gr.Dropdown(
+                                    choices=[],
+                                    label="Dataset ID",
+                                )
+                                dataset_split_select = gr.Dropdown(
+                                    choices=["train", "val", "test"],
+                                    value="test",
+                                    label="Split",
+                                )
+                                dataset_sample_index = gr.Number(value=0, precision=0, label="Sample Index")
+                                btn_load_dataset_sample = gr.Button(
+                                    "Load Dataset Sample",
+                                    variant="primary",
+                                )
+
+                            with gr.Column(scale=1):
+                                preview_plot_dataset = gr.Plot(label="Dataset Sample Preview")
+                                preview_info_dataset = gr.JSON(label="Dataset Sample Info")
+
                 # --- Common: Confirm & Continue ---
                 gr.Markdown("---")
                 with gr.Row():
@@ -881,6 +1111,18 @@ def build_app():
                             value="auto",
                             label="Device",
                         )
+                        gr.Markdown("**Load Checkpoint from Run History**")
+                        history_file_path = gr.Textbox(
+                            label="Run History File",
+                            value=str(RUN_HISTORY_DEFAULT),
+                        )
+                        btn_refresh_history = gr.Button("Refresh Runs", variant="secondary")
+                        history_refresh_status = gr.Textbox(label="Run History Status", lines=2)
+                        history_run_id = gr.Dropdown(
+                            choices=[],
+                            label="Run ID",
+                        )
+                        btn_apply_history_run = gr.Button("Use This Run Checkpoint", variant="secondary")
                         btn_run = gr.Button("Run Inference", variant="primary", size="lg")
 
                     with gr.Column(scale=2):
@@ -889,6 +1131,7 @@ def build_app():
                             "Confirm input in Step 1 first.</p>"
                         )
                         inference_progress = gr.HTML("")
+                        history_run_info = gr.JSON(label="Selected Run Metadata")
 
             # ================================================================
             # TAB 3: RESULTS
@@ -1044,6 +1287,18 @@ def build_app():
             outputs=[preview_plot_upload, preview_info_upload, input_state],
         )
 
+        btn_refresh_datasets.click(
+            fn=_refresh_dataset_choices,
+            inputs=[dataset_base_path],
+            outputs=[dataset_id_select, dataset_refresh_status],
+        )
+
+        btn_load_dataset_sample.click(
+            fn=_load_dataset_sample,
+            inputs=[dataset_base_path, dataset_id_select, dataset_split_select, dataset_sample_index],
+            outputs=[preview_plot_dataset, preview_info_dataset, input_state, grid_size],
+        )
+
         # --- Confirm Input ---
         def confirm_input(state_dict):
             if state_dict is None:
@@ -1142,7 +1397,18 @@ def build_app():
 
         # --- Clear ---
         def clear_all():
-            return None, None, None, "<p>Cleared. Ready for new input.</p>", None, None, None, None
+            return (
+                None,
+                None,
+                None,
+                "<p>Cleared. Ready for new input.</p>",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+            )
 
         btn_clear.click(
             fn=clear_all,
@@ -1151,19 +1417,42 @@ def build_app():
                 input_state, preview_plot_2c, preview_info_2c, inference_status,
                 preview_plot_random, preview_info_random,
                 preview_plot_upload, preview_info_upload,
+                preview_plot_dataset, preview_info_dataset,
             ],
         )
 
         # --- Update Checkpoint Dropdown ---
-        def update_checkpoint(model):
+        def update_checkpoint(model, current_checkpoint):
             filtered_choices = _get_model_filtered_checkpoints(model)
+            choices = filtered_choices if filtered_choices else CHECKPOINT_CHOICES
+
+            if current_checkpoint:
+                ckpt_path = Path(str(current_checkpoint))
+                if ckpt_path.is_absolute() and ckpt_path.exists():
+                    ckpt_str = str(ckpt_path)
+                    if ckpt_str not in choices:
+                        choices = [ckpt_str] + list(choices)
+                    return gr.update(choices=choices, value=ckpt_str)
+
             default = default_checkpoint_choice(model) if filtered_choices else None
-            return gr.update(choices=filtered_choices if filtered_choices else CHECKPOINT_CHOICES, value=default)
+            return gr.update(choices=choices, value=default)
 
         model_name.change(
             fn=update_checkpoint,
-            inputs=[model_name],
+            inputs=[model_name, checkpoint_name],
             outputs=[checkpoint_name],
+        )
+
+        btn_refresh_history.click(
+            fn=_refresh_history_run_choices,
+            inputs=[history_file_path],
+            outputs=[history_run_id, history_refresh_status],
+        )
+
+        btn_apply_history_run.click(
+            fn=_apply_history_run_selection,
+            inputs=[history_file_path, history_run_id],
+            outputs=[model_name, checkpoint_name, inference_status, history_run_info],
         )
 
         # --- Run Inference ---
@@ -1245,6 +1534,18 @@ def build_app():
         tab1.select(fn=None, inputs=None, outputs=None)
         tab2.select(fn=None, inputs=None, outputs=None)
         tab3.select(fn=None, inputs=None, outputs=None)
+
+        # Startup refresh for dataset list and run history list.
+        demo.load(
+            fn=_refresh_dataset_choices,
+            inputs=[dataset_base_path],
+            outputs=[dataset_id_select, dataset_refresh_status],
+        )
+        demo.load(
+            fn=_refresh_history_run_choices,
+            inputs=[history_file_path],
+            outputs=[history_run_id, history_refresh_status],
+        )
 
     return demo
 
