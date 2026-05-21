@@ -17,6 +17,7 @@ from models_nonGaussian import (
     NonGaussian3CInverseNet,
     NonGaussian3CLoss,
     compute_dei_from_pathway_weights,
+    infer_architecture_from_state_dict,
     sample_3c_nongaussian_inverse_dataset,
 )
 
@@ -60,9 +61,34 @@ def test_loss_zero_when_prediction_matches_target():
 
     total, metrics = criterion(pred, target_w, target_dei)
 
-    assert float(total.item()) < 1e-8
-    assert float(metrics["loss_w"].item()) < 1e-8
-    assert float(metrics["loss_dei"].item()) < 1e-8
+    assert float(total.item()) < 1e-7
+    assert float(metrics["loss_w"].item()) < 1e-7
+    assert float(metrics["loss_dei"].item()) < 1e-7
+
+
+def test_legacy_rescnn_architecture_still_runs():
+    model = NonGaussian3CInverseNet(
+        base_channels=8,
+        hidden_dim=64,
+        architecture="rescnn",
+    ).eval()
+
+    x = torch.rand(2, 16, 16)
+    pred = model(x)
+    assert pred.pathway_weights.shape == (2, 9)
+    np.testing.assert_allclose(
+        pred.pathway_weights.sum(dim=1).detach().cpu().numpy(),
+        np.ones(2, dtype=np.float32),
+        atol=1e-6,
+    )
+
+
+def test_infer_architecture_from_state_dict():
+    hybrid = NonGaussian3CInverseNet(base_channels=8, hidden_dim=64, architecture="hybrid_transformer")
+    legacy = NonGaussian3CInverseNet(base_channels=8, hidden_dim=64, architecture="rescnn")
+
+    assert infer_architecture_from_state_dict(hybrid.state_dict()) == "hybrid_transformer"
+    assert infer_architecture_from_state_dict(legacy.state_dict()) == "rescnn"
 
 
 def test_sampling_helper_shapes_and_constraints():

@@ -1712,7 +1712,10 @@ def _evaluate_pathway_checkpoint(
     run_row: dict[str, Any] | None,
     batch_size_eval: int,
 ) -> dict[str, float]:
-    from models_nonGaussian.cnn.model import NonGaussian3CInverseNet
+    from models_nonGaussian.cnn.model import (
+        NonGaussian3CInverseNet,
+        infer_architecture_from_state_dict,
+    )
 
     split = dataset.get_split("test")
     signals = np.asarray(split["signals"], dtype=np.float32)
@@ -1723,9 +1726,32 @@ def _evaluate_pathway_checkpoint(
         true_pathway = true_pathway.reshape(true_pathway.shape[0], -1)
     true_dei = np.asarray(split["dei"], dtype=np.float32).reshape(-1)
     cfg = dict((run_row or {}).get("config", {}))
+    try:
+        ckpt = torch.load(str(checkpoint_path), map_location="cpu", weights_only=False)
+    except TypeError:
+        ckpt = torch.load(str(checkpoint_path), map_location="cpu")
+    ckpt_cfg = ckpt.get("config", {}) if isinstance(ckpt, dict) else {}
+    if isinstance(ckpt_cfg, dict):
+        for k, v in ckpt_cfg.items():
+            cfg.setdefault(k, v)
+    state_dict = ckpt.get("model_state_dict", ckpt) if isinstance(ckpt, dict) else ckpt
+    if isinstance(state_dict, dict):
+        state_dict = _normalize_state_dict_keys(state_dict)
+    architecture = str(cfg.get("architecture", "")).strip()
+    if not architecture and isinstance(state_dict, dict):
+        architecture = infer_architecture_from_state_dict(state_dict)
+    if not architecture:
+        architecture = "hybrid_transformer"
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = NonGaussian3CInverseNet(
+        base_channels=int(cfg.get("base_channels", 32)),
         hidden_dim=int(cfg.get("hidden_dim", 256)),
+        dropout=float(cfg.get("dropout", 0.15)),
+        architecture=architecture,
+        transformer_depth=int(cfg.get("transformer_depth", 4)),
+        transformer_heads=int(cfg.get("transformer_heads", 8)),
+        transformer_mlp_ratio=float(cfg.get("transformer_mlp_ratio", 3.0)),
     ).to(device)
     _load_model_state(model, checkpoint_path=checkpoint_path, device=device)
     model.eval()

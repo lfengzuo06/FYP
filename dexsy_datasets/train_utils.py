@@ -123,6 +123,10 @@ def create_cnn_nongaussian(
     n_pathways: int = 9,
     base_channels: int = 32,
     dropout: float = 0.15,
+    architecture: str = "hybrid_transformer",
+    transformer_depth: int = 4,
+    transformer_heads: int = 8,
+    transformer_mlp_ratio: float = 3.0,
 ) -> torch.nn.Module:
     """Create CNN for pathway regression."""
     try:
@@ -131,6 +135,10 @@ def create_cnn_nongaussian(
             base_channels=base_channels,
             hidden_dim=hidden_dim,
             dropout=dropout,
+            architecture=architecture,
+            transformer_depth=transformer_depth,
+            transformer_heads=transformer_heads,
+            transformer_mlp_ratio=transformer_mlp_ratio,
         )
     except ImportError:
         return _SimplePathwayCNN(in_channels, hidden_dim, n_pathways, base_channels, dropout)

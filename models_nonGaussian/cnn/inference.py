@@ -14,6 +14,7 @@ import torch
 from .model import (
     NonGaussian3CInverseNet,
     PATHWAY_ORDER_3C,
+    infer_architecture_from_state_dict,
 )
 
 
@@ -52,12 +53,19 @@ class InferencePipeline:
 
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
         state_dict = checkpoint.get("model_state_dict", checkpoint)
+        if any(str(k).startswith("module.") for k in state_dict.keys()):
+            state_dict = {str(k)[len("module."):]: v for k, v in state_dict.items()}
         cfg = checkpoint.get("config", {})
+        architecture = str(cfg.get("architecture") or infer_architecture_from_state_dict(state_dict))
 
         self.model = NonGaussian3CInverseNet(
             base_channels=int(cfg.get("base_channels", 32)),
             hidden_dim=int(cfg.get("hidden_dim", 256)),
             dropout=float(cfg.get("dropout", 0.15)),
+            architecture=architecture,
+            transformer_depth=int(cfg.get("transformer_depth", 4)),
+            transformer_heads=int(cfg.get("transformer_heads", 8)),
+            transformer_mlp_ratio=float(cfg.get("transformer_mlp_ratio", 3.0)),
         ).to(self.device)
         self.model.load_state_dict(state_dict)
         self.model.eval()

@@ -15,6 +15,7 @@ from .model import (
     flatten_pathway_matrix_to_vector,
     compute_dei_from_pathway_weights,
     compute_dei_from_weight_matrix,
+    infer_architecture_from_state_dict,
     NonGaussian3CInverseNet,
     NonGaussian3CLoss,
 )
@@ -42,6 +43,7 @@ __all__ = [
     "flatten_pathway_matrix_to_vector",
     "compute_dei_from_pathway_weights",
     "compute_dei_from_weight_matrix",
+    "infer_architecture_from_state_dict",
     "NonGaussian3CInverseNet",
     "NonGaussian3CLoss",
     "NonGaussian3CDataset",

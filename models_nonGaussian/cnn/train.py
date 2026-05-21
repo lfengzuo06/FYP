@@ -369,9 +369,14 @@ def train_nongaussian_inverse_model(
     early_stopping_patience: int = 15,
     early_stopping_min_delta: float = 1e-5,
     lambda_dei: float = 1.0,
+    lambda_kl: float = 0.20,
     base_channels: int = 32,
     hidden_dim: int = 256,
     dropout: float = 0.15,
+    architecture: str = "hybrid_transformer",
+    transformer_depth: int = 4,
+    transformer_heads: int = 8,
+    transformer_mlp_ratio: float = 3.0,
     n_b: int = 16,
     n_restrict_terms: int = 500,
     seed: int = 42,
@@ -467,9 +472,16 @@ def train_nongaussian_inverse_model(
         base_channels=int(base_channels),
         hidden_dim=int(hidden_dim),
         dropout=float(dropout),
+        architecture=str(architecture),
+        transformer_depth=int(transformer_depth),
+        transformer_heads=int(transformer_heads),
+        transformer_mlp_ratio=float(transformer_mlp_ratio),
     ).to(device_t)
 
-    criterion = NonGaussian3CLoss(lambda_dei=float(lambda_dei)).to(device_t)
+    criterion = NonGaussian3CLoss(
+        lambda_dei=float(lambda_dei),
+        lambda_kl=float(lambda_kl),
+    ).to(device_t)
     optimizer = torch.optim.AdamW(
         model.parameters(),
         lr=float(learning_rate),
@@ -511,7 +523,7 @@ def train_nongaussian_inverse_model(
     )
     print(
         f"[NonGaussian-3C] params: epochs={epochs}, batch_size={batch_size}, "
-        f"lambda_dei={lambda_dei}, n_b={n_b}"
+        f"lambda_dei={lambda_dei}, lambda_kl={lambda_kl}, n_b={n_b}, arch={architecture}"
     )
 
     t0 = time.time()
@@ -580,6 +592,11 @@ def train_nongaussian_inverse_model(
                         "hidden_dim": int(hidden_dim),
                         "dropout": float(dropout),
                         "lambda_dei": float(lambda_dei),
+                        "lambda_kl": float(lambda_kl),
+                        "architecture": str(architecture),
+                        "transformer_depth": int(transformer_depth),
+                        "transformer_heads": int(transformer_heads),
+                        "transformer_mlp_ratio": float(transformer_mlp_ratio),
                     },
                 },
                 run_dir / "best_model.pt",
@@ -620,9 +637,14 @@ def train_nongaussian_inverse_model(
             "learning_rate": float(learning_rate),
             "weight_decay": float(weight_decay),
             "lambda_dei": float(lambda_dei),
+            "lambda_kl": float(lambda_kl),
             "base_channels": int(base_channels),
             "hidden_dim": int(hidden_dim),
             "dropout": float(dropout),
+            "architecture": str(architecture),
+            "transformer_depth": int(transformer_depth),
+            "transformer_heads": int(transformer_heads),
+            "transformer_mlp_ratio": float(transformer_mlp_ratio),
             "n_b": int(n_b),
             "n_restrict_terms": int(n_restrict_terms),
             "seed": int(seed),
@@ -664,9 +686,20 @@ def _build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--learning-rate", type=float, default=1e-3)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
     parser.add_argument("--lambda-dei", type=float, default=1.0)
+    parser.add_argument("--lambda-kl", type=float, default=0.20)
     parser.add_argument("--base-channels", type=int, default=32)
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--dropout", type=float, default=0.15)
+    parser.add_argument(
+        "--architecture",
+        type=str,
+        default="hybrid_transformer",
+        choices=["hybrid_transformer", "rescnn"],
+        help="Model backbone architecture.",
+    )
+    parser.add_argument("--transformer-depth", type=int, default=4)
+    parser.add_argument("--transformer-heads", type=int, default=8)
+    parser.add_argument("--transformer-mlp-ratio", type=float, default=3.0)
     parser.add_argument("--n-b", type=int, default=16)
     parser.add_argument("--n-restrict-terms", type=int, default=500)
     parser.add_argument("--seed", type=int, default=42)
@@ -704,9 +737,14 @@ def main() -> None:
         learning_rate=args.learning_rate,
         weight_decay=args.weight_decay,
         lambda_dei=args.lambda_dei,
+        lambda_kl=args.lambda_kl,
         base_channels=args.base_channels,
         hidden_dim=args.hidden_dim,
         dropout=args.dropout,
+        architecture=args.architecture,
+        transformer_depth=args.transformer_depth,
+        transformer_heads=args.transformer_heads,
+        transformer_mlp_ratio=args.transformer_mlp_ratio,
         n_b=args.n_b,
         n_restrict_terms=args.n_restrict_terms,
         seed=args.seed,
