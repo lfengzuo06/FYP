@@ -128,6 +128,44 @@ def generate_dataset(
     return datasets
 
 
+def resolve_loss_profile(
+    n_d: int,
+    loss_profile: str = "auto",
+) -> tuple[str, dict[str, float]]:
+    """Resolve loss hyperparameters for the requested grid/profile."""
+    profiles = {
+        "default": {
+            "alpha_kl": 1.0,
+            "alpha_rec": 0.2,
+            "alpha_signal": 0.1,
+            "alpha_sum": 0.05,
+            "peak_weight": 6.0,
+            "alpha_smooth": 2e-2,
+            "alpha_entropy": 0.0,
+        },
+        # 16x16-specific stable profile to reduce over-sharp spikes.
+        "g16_stable": {
+            "alpha_kl": 1.0,
+            "alpha_rec": 0.15,
+            "alpha_signal": 0.03,
+            "alpha_sum": 0.05,
+            "peak_weight": 2.5,
+            "alpha_smooth": 8e-2,
+            "alpha_entropy": 1.5e-2,
+        },
+    }
+    if loss_profile == "auto":
+        selected = "g16_stable" if n_d <= 16 else "default"
+    elif loss_profile in profiles:
+        selected = loss_profile
+    else:
+        raise ValueError(
+            f"Unknown loss_profile='{loss_profile}'. "
+            f"Use one of: {list(profiles.keys()) + ['auto']}"
+        )
+    return selected, profiles[selected]
+
+
 def train_model(
     output_dir: str = None,
     n_train: int = 9500,
@@ -153,6 +191,8 @@ def train_model(
     n_b: int = 64,
     dataset_id: str = None,
     datasets_dir: str = "datasets",
+    loss_profile: str = "auto",
+    gate_residual: bool | None = None,
 ) -> tuple:
     """
     Train the Attention U-Net model on 3C data.
@@ -182,6 +222,9 @@ def train_model(
         n_b: Grid size for b-value dimension
         dataset_id: Pre-generated dataset ID (loads from disk instead of generating)
         datasets_dir: Base directory for datasets (when using dataset_id)
+        loss_profile: Loss preset ("auto", "default", "g16_stable")
+        gate_residual: Whether to keep residual branch in attention gates.
+            None uses auto rule (disabled for 16x16, enabled otherwise).
 
     Returns:
         (model, history, datasets, forward_model)
@@ -271,15 +314,22 @@ def train_model(
 
     set_seed(init_seed)
 
+    # Configure low-resolution behavior.
+    if gate_residual is None:
+        gate_residual = n_d > 16
+    selected_loss_profile, loss_cfg = resolve_loss_profile(n_d=n_d, loss_profile=loss_profile)
+
     # Create model
     model = AttentionUNet3C(
         in_channels=datasets['train']['inputs'].shape[1],
-        base_filters=base_filters
+        base_filters=base_filters,
+        gate_residual=gate_residual,
     ).to(device)
 
     print(f"Model: AttentionUNet3C")
     print(f"  Input channels: {datasets['train']['inputs'].shape[1]}")
     print(f"  Base filters: {base_filters}")
+    print(f"  Gate residual: {gate_residual}")
     n_params = sum(p.numel() for p in model.parameters())
     print(f"  Parameters: {n_params:,}")
 
@@ -293,13 +343,22 @@ def train_model(
     # Loss and optimizer
     criterion = PhysicsInformedLoss3C(
         forward_model=forward_model,
-        alpha_kl=1.0,
-        alpha_rec=0.2,
-        alpha_signal=0.1,
-        alpha_sum=0.05,
-        peak_weight=6.0,
-        alpha_smooth=2e-2,
+        alpha_kl=loss_cfg["alpha_kl"],
+        alpha_rec=loss_cfg["alpha_rec"],
+        alpha_signal=loss_cfg["alpha_signal"],
+        alpha_sum=loss_cfg["alpha_sum"],
+        peak_weight=loss_cfg["peak_weight"],
+        alpha_smooth=loss_cfg["alpha_smooth"],
+        alpha_entropy=loss_cfg["alpha_entropy"],
     ).to(device)
+    print(f"  Loss profile: {selected_loss_profile}")
+    print(
+        "  Loss weights: "
+        f"KL={loss_cfg['alpha_kl']}, REC={loss_cfg['alpha_rec']}, "
+        f"SIGNAL={loss_cfg['alpha_signal']}, SUM={loss_cfg['alpha_sum']}, "
+        f"PEAK={loss_cfg['peak_weight']}, SMOOTH={loss_cfg['alpha_smooth']}, "
+        f"ENTROPY={loss_cfg['alpha_entropy']}"
+    )
 
     optimizer = optim.AdamW(model.parameters(), lr=learning_rate, weight_decay=weight_decay)
     scheduler = optim.lr_scheduler.ReduceLROnPlateau(
@@ -361,6 +420,17 @@ def train_model(
     print("=" * 60)
 
     start_time = time.time()
+
+    train_config = {
+        'base_filters': base_filters,
+        'in_channels': datasets['train']['inputs'].shape[1],
+        'n_d': n_d,
+        'n_b': n_b,
+        'n_compartments': n_compartments,
+        'loss_profile': selected_loss_profile,
+        'gate_residual': gate_residual,
+        **loss_cfg,
+    }
 
     for epoch in range(epochs):
         epoch_start = time.time()
@@ -435,6 +505,7 @@ def train_model(
                 'model_state_dict': model.state_dict(),
                 'optimizer_state_dict': optimizer.state_dict(),
                 'val_loss': val_loss,
+                'config': train_config,
             }, model_dir / "best_model.pt")
         else:
             patience_counter += 1
@@ -456,13 +527,7 @@ def train_model(
     torch.save({
         'model_state_dict': model.state_dict(),
         'history': history,
-        'config': {
-            'base_filters': base_filters,
-            'in_channels': datasets['train']['inputs'].shape[1],
-            'n_d': n_d,
-            'n_b': n_b,
-            'n_compartments': n_compartments,
-        }
+        'config': train_config,
     }, model_dir / "final_model.pt")
 
     # Save training log
@@ -488,6 +553,15 @@ def train_model(
         f.write(f"base_filters: {base_filters}\n")
         f.write(f"learning_rate: {learning_rate}\n")
         f.write(f"noise_sigma_range: {noise_sigma_range}\n")
+        f.write(f"loss_profile: {selected_loss_profile}\n")
+        f.write(f"gate_residual: {gate_residual}\n")
+        f.write(f"alpha_kl: {loss_cfg['alpha_kl']}\n")
+        f.write(f"alpha_rec: {loss_cfg['alpha_rec']}\n")
+        f.write(f"alpha_signal: {loss_cfg['alpha_signal']}\n")
+        f.write(f"alpha_sum: {loss_cfg['alpha_sum']}\n")
+        f.write(f"peak_weight: {loss_cfg['peak_weight']}\n")
+        f.write(f"alpha_smooth: {loss_cfg['alpha_smooth']}\n")
+        f.write(f"alpha_entropy: {loss_cfg['alpha_entropy']}\n")
         f.write(f"best_val_loss: {best_val_loss:.6f}\n")
         f.write(f"best_epoch: {history['best_epoch']}\n")
         f.write(f"train_time: {train_time:.2f}s\n")
@@ -523,6 +597,20 @@ def main():
     parser.add_argument('--n_d', type=int, default=64, help='Grid size for diffusion dimension')
     parser.add_argument('--n_b', type=int, default=64, help='Grid size for b-value dimension')
     parser.add_argument('--grid_size', type=int, default=64, help='Shorthand: set both n_d and n_b')
+    parser.add_argument(
+        '--loss_profile',
+        type=str,
+        default='auto',
+        choices=['auto', 'default', 'g16_stable'],
+        help='Loss preset. auto uses g16_stable for 16x16 and default otherwise.',
+    )
+    parser.add_argument(
+        '--gate_residual',
+        type=str,
+        default='auto',
+        choices=['auto', 'on', 'off'],
+        help='Residual branch in attention gates. auto disables for 16x16.',
+    )
     args = parser.parse_args()
 
     # Use grid_size shorthand if provided
@@ -530,6 +618,7 @@ def main():
     n_b = args.grid_size if args.grid_size != 64 else args.n_b
     init_seed = args.init_seed if args.init_seed is not None else args.seed
     dataloader_seed = args.dataloader_seed if args.dataloader_seed is not None else args.seed
+    gate_residual = None if args.gate_residual == 'auto' else (args.gate_residual == 'on')
 
     train_model(
         output_dir=args.output_dir,
@@ -548,6 +637,8 @@ def main():
         dataloader_seed=dataloader_seed,
         n_d=n_d,
         n_b=n_b,
+        loss_profile=args.loss_profile,
+        gate_residual=gate_residual,
     )
 
 

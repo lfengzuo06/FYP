@@ -125,6 +125,7 @@ class InferencePipeline3C:
 
         checkpoint = torch.load(self.checkpoint_path, map_location=self.device)
         state_dict = checkpoint.get('model_state_dict', checkpoint)
+        config = checkpoint.get('config', {}) if isinstance(checkpoint, dict) else {}
 
         # Infer model config from state dict
         if 'enc1.conv1.weight' in state_dict:
@@ -133,10 +134,12 @@ class InferencePipeline3C:
         else:
             base_filters = 32
             in_channels = 3
+        gate_residual = bool(config.get('gate_residual', True))
 
         model = AttentionUNet3C(
             in_channels=in_channels,
-            base_filters=base_filters
+            base_filters=base_filters,
+            gate_residual=gate_residual,
         ).to(self.device)
 
         model.load_state_dict(state_dict)
@@ -147,6 +150,7 @@ class InferencePipeline3C:
             "device": str(self.device),
             "base_filters": base_filters,
             "in_channels": in_channels,
+            "gate_residual": gate_residual,
             "model_name": self.MODEL_NAME,
             "epoch": checkpoint.get('epoch'),
             "val_loss": checkpoint.get('val_loss'),

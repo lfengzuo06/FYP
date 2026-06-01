@@ -7,6 +7,8 @@ with physics-informed training support.
 
 from __future__ import annotations
 
+import math
+
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -28,7 +30,13 @@ class AttentionGate(nn.Module):
     by learning attention weights.
     """
 
-    def __init__(self, x_channels: int, g_channels: int, out_channels: int):
+    def __init__(
+        self,
+        x_channels: int,
+        g_channels: int,
+        out_channels: int,
+        use_residual: bool = True,
+    ):
         super().__init__()
         self.W_x = nn.Conv2d(x_channels, out_channels, kernel_size=1, padding=0)
         self.W_g = nn.Conv2d(g_channels, out_channels, kernel_size=1, padding=0)
@@ -36,7 +44,11 @@ class AttentionGate(nn.Module):
             nn.Conv2d(out_channels, 1, kernel_size=1, padding=0),
             nn.Sigmoid()
         )
-        self.res_conv = nn.Conv2d(out_channels, out_channels, kernel_size=1, padding=0)
+        self.res_conv = (
+            nn.Conv2d(out_channels, out_channels, kernel_size=1, padding=0)
+            if use_residual
+            else None
+        )
 
     def forward(self, x: torch.Tensor, g: torch.Tensor) -> torch.Tensor:
         theta_x = self.W_x(x)
@@ -45,7 +57,8 @@ class AttentionGate(nn.Module):
         act = F.leaky_relu(add, negative_slope=0.2)
         psi = self.psi(act)
         out = x * psi
-        out = out + self.res_conv(out)
+        if self.res_conv is not None:
+            out = out + self.res_conv(out)
         return out
 
 
@@ -96,10 +109,16 @@ class AttentionUNet3C(nn.Module):
     Output: (batch, 1, grid_size, grid_size) normalized distribution
     """
 
-    def __init__(self, in_channels: int = 3, base_filters: int = 32):
+    def __init__(
+        self,
+        in_channels: int = 3,
+        base_filters: int = 32,
+        gate_residual: bool = True,
+    ):
         super().__init__()
         self.in_channels = in_channels
         self.base_filters = base_filters
+        self.gate_residual = gate_residual
         self.output_activation = nn.Softplus()
 
         self.input_norm = nn.InstanceNorm2d(in_channels, affine=False)
@@ -118,15 +137,30 @@ class AttentionUNet3C(nn.Module):
 
         # Decoder Path
         self.up3 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        self.att3 = AttentionGate(base_filters * 4, base_filters * 8, base_filters * 4)
+        self.att3 = AttentionGate(
+            base_filters * 4,
+            base_filters * 8,
+            base_filters * 4,
+            use_residual=gate_residual,
+        )
         self.dec3 = ResidualDenseBlock(base_filters * 4 + base_filters * 8, base_filters * 4)
 
         self.up2 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        self.att2 = AttentionGate(base_filters * 2, base_filters * 4, base_filters * 2)
+        self.att2 = AttentionGate(
+            base_filters * 2,
+            base_filters * 4,
+            base_filters * 2,
+            use_residual=gate_residual,
+        )
         self.dec2 = ResidualDenseBlock(base_filters * 2 + base_filters * 4, base_filters * 2)
 
         self.up1 = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=False)
-        self.att1 = AttentionGate(base_filters, base_filters * 2, base_filters)
+        self.att1 = AttentionGate(
+            base_filters,
+            base_filters * 2,
+            base_filters,
+            use_residual=gate_residual,
+        )
         self.dec1 = ResidualDenseBlock(base_filters + base_filters * 2, base_filters)
 
         # Output layer
@@ -190,6 +224,7 @@ class PhysicsInformedLoss3C(nn.Module):
         alpha_sum: float = 0.05,
         peak_weight: float = 6.0,
         alpha_smooth: float = 2e-2,
+        alpha_entropy: float = 0.0,
     ):
         super().__init__()
         kernel = torch.from_numpy(forward_model.kernel_matrix).float()
@@ -201,6 +236,7 @@ class PhysicsInformedLoss3C(nn.Module):
         self.alpha_sum = alpha_sum
         self.peak_weight = peak_weight
         self.alpha_smooth = alpha_smooth
+        self.alpha_entropy = alpha_entropy
 
     def reconstruct_signal(self, y_pred: torch.Tensor) -> torch.Tensor:
         batch_size = y_pred.shape[0]
@@ -230,13 +266,18 @@ class PhysicsInformedLoss3C(nn.Module):
         smooth_x = torch.mean(torch.abs(y_pred[:, :, 1:, :] - y_pred[:, :, :-1, :]))
         smooth_y = torch.mean(torch.abs(y_pred[:, :, :, 1:] - y_pred[:, :, :, :-1]))
         smoothness = smooth_x + smooth_y
+        n_pixels = y_pred.shape[2] * y_pred.shape[3]
+        max_entropy = math.log(float(max(n_pixels, 2)))
+        entropy = -torch.sum(y_pred * torch.log(y_pred + 1e-8), dim=(2, 3))
+        entropy_penalty = torch.mean(torch.clamp(1.0 - entropy / (max_entropy + 1e-8), min=0.0))
 
         total_loss = (
             self.alpha_kl * kl_loss +
             self.alpha_rec * rec_loss +
             self.alpha_signal * signal_loss +
             self.alpha_sum * sum_penalty +
-            self.alpha_smooth * smoothness
+            self.alpha_smooth * smoothness +
+            self.alpha_entropy * entropy_penalty
         )
         return total_loss
 
