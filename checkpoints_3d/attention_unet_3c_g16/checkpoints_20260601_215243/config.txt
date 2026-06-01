@@ -1,0 +1,23 @@
+n_d: 16
+n_b: 16
+n_compartments: 3
+n_train: 9500
+n_val: 400
+n_test: 100
+epochs: 60
+batch_size: 8
+base_filters: 32
+learning_rate: 0.0005
+noise_sigma_range: (0.005, 0.015)
+loss_profile: g16_stable
+gate_residual: False
+alpha_kl: 1.0
+alpha_rec: 0.15
+alpha_signal: 0.03
+alpha_sum: 0.05
+peak_weight: 2.5
+alpha_smooth: 0.08
+alpha_entropy: 0.015
+best_val_loss: 0.146340
+best_epoch: 31
+train_time: 336.28s
