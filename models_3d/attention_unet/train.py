@@ -128,6 +128,29 @@ def generate_dataset(
     return datasets
 
 
+def resolve_training_output_dir(
+    output_dir: str | Path | None,
+    n_d: int,
+) -> Path:
+    """
+    Resolve checkpoint output directory with explicit precedence.
+
+    Precedence:
+    1) Explicit ``output_dir`` argument
+    2) ``DEXSY_OUTPUT_DIR`` environment variable
+    3) Repository-local default (backward compatible)
+    """
+    if output_dir is not None:
+        resolved = Path(output_dir)
+    else:
+        env_output = os.environ.get("DEXSY_OUTPUT_DIR")
+        if env_output:
+            resolved = Path(env_output) / f"attention_unet_3c_g{n_d}"
+        else:
+            resolved = Path(__file__).parent.parent.parent / "checkpoints_3d" / f"attention_unet_3c_g{n_d}"
+    return resolved
+
+
 def resolve_loss_profile(
     n_d: int,
     loss_profile: str = "auto",
@@ -234,13 +257,9 @@ def train_model(
     if dataloader_seed is None:
         dataloader_seed = seed
 
-    if output_dir is None:
-        output_dir = Path(__file__).parent.parent.parent / "checkpoints_3d" / f"attention_unet_3c_g{n_d}"
-    else:
-        output_dir = Path(output_dir)
-
-    output_dir = Path(output_dir)
+    output_dir = resolve_training_output_dir(output_dir=output_dir, n_d=n_d)
     output_dir.mkdir(parents=True, exist_ok=True)
+    print(f"Checkpoint root directory: {output_dir.resolve()}")
 
     # Device setup
     if device is None:
