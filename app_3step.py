@@ -458,6 +458,13 @@ def _plot_heatmap(data: np.ndarray, title: str, cmap: str = DISPLAY_CMAP, figsiz
 def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=None) -> plt.Figure:
     """Create comparison figure with shared GT/pred color mapping and brighter linear display."""
     n_plots = 4 if ground_truth is not None else 3
+    grid_size = int(np.asarray(signal).shape[-1])
+    display_interp = "nearest" if grid_size == 16 else DISPLAY_INTERPOLATION
+
+    def spectrum_for_display(spectrum):
+        if grid_size == 16:
+            return np.asarray(spectrum)
+        return _smooth_spectrum_for_display(spectrum)
 
     if n_plots == 4:
         fig, axes = plt.subplots(1, 4, figsize=(14, 3.2))
@@ -465,15 +472,15 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
         fig, axes = plt.subplots(1, 3, figsize=(10, 3.2))
 
     # Signal
-    im0 = axes[0].imshow(signal, cmap=DISPLAY_CMAP, origin="lower", interpolation=DISPLAY_INTERPOLATION)
+    im0 = axes[0].imshow(signal, cmap=DISPLAY_CMAP, origin="lower", interpolation=display_interp)
     axes[0].set_title("Input Signal", fontsize=10)
     axes[0].set_xlabel("b2 index")
     axes[0].set_ylabel("b1 index")
     plt.colorbar(im0, ax=axes[0], fraction=0.046, pad=0.04)
 
     if ground_truth is not None:
-        gt_display = _smooth_spectrum_for_display(ground_truth)
-        pred_display = _smooth_spectrum_for_display(prediction)
+        gt_display = spectrum_for_display(ground_truth)
+        pred_display = spectrum_for_display(prediction)
 
         # Shared linear mapping for GT + model output (with percentile clip for visibility)
         vmin, vmax = _shared_linear_display_range(gt_display, pred_display)
@@ -484,7 +491,7 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
             origin="lower",
             vmin=vmin,
             vmax=vmax,
-            interpolation=DISPLAY_INTERPOLATION,
+            interpolation=display_interp,
         )
         gt_title = "Ground Truth"
         if dei_gt is not None:
@@ -502,7 +509,7 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
             origin="lower",
             vmin=vmin,
             vmax=vmax,
-            interpolation=DISPLAY_INTERPOLATION,
+            interpolation=display_interp,
         )
         pred_title = "Model Output"
         if dei_pred is not None:
@@ -517,14 +524,14 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
         diff = pred_display - gt_display
         vrange = max(abs(diff.min()), abs(diff.max()), vmax/8)
         im3 = axes[3].imshow(diff, cmap="coolwarm", origin="lower",
-                             vmin=-vrange, vmax=vrange, interpolation=DISPLAY_INTERPOLATION)
+                             vmin=-vrange, vmax=vrange, interpolation=display_interp)
         axes[3].set_title("Difference\n(Pred - GT)", fontsize=10)
         axes[3].set_xlabel("D2 index")
         axes[3].set_ylabel("D1 index")
         plt.colorbar(im3, ax=axes[3], fraction=0.046, pad=0.04)
     else:
         # No ground truth - just signal and prediction
-        pred_display = _smooth_spectrum_for_display(prediction)
+        pred_display = spectrum_for_display(prediction)
         vmin, vmax = _shared_linear_display_range(pred_display)
         im1 = axes[1].imshow(
             pred_display,
@@ -532,7 +539,7 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
             origin="lower",
             vmin=vmin,
             vmax=vmax,
-            interpolation=DISPLAY_INTERPOLATION,
+            interpolation=display_interp,
         )
         pred_title = "Model Output"
         if dei_pred is not None:
@@ -545,7 +552,7 @@ def _plot_comparison(signal, ground_truth, prediction, dei_gt=None, dei_pred=Non
 
         # Log signal
         im2 = axes[2].imshow(np.log(signal + 1e-6), cmap=DISPLAY_CMAP,
-                             origin="lower", interpolation=DISPLAY_INTERPOLATION)
+                             origin="lower", interpolation=display_interp)
         axes[2].set_title("Log(Signal)", fontsize=10)
         axes[2].set_xlabel("b2 index")
         axes[2].set_ylabel("b1 index")
@@ -945,8 +952,6 @@ def build_app():
                     with gr.TabItem("Parametric Generation"):
                         with gr.Row():
                             with gr.Column(scale=1):
-                                gr.Markdown("**2-Compartment Parameters**")
-
                                 n_compartments_2c = gr.Radio(
                                     choices=[2, 3],
                                     value=2,
@@ -986,7 +991,6 @@ def build_app():
                                     )
 
                                 with gr.Group(visible=False) as params_3c:
-                                    gr.Markdown("**3-Compartment Parameters**")
                                     d1_3c = gr.Slider(5e-12, 3e-11, value=1e-11, step=1e-12,
                                                       label="D1 (Intracellular)")
                                     d2_3c = gr.Slider(3e-11, 5e-9, value=5e-10, step=1e-10,
