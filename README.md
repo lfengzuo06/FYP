@@ -32,7 +32,6 @@ The main workflow is:
 
 ```text
 .
-├── app.py                     # Minimal 2D Gradio reconstruction app
 ├── app_3step.py               # Step-by-step data/model/result interface
 ├── app_training.py            # Dataset, training, comparison, and history app
 ├── run_inference.py           # CLI for single, batch, and synthetic inference
@@ -79,10 +78,10 @@ used automatically when available; otherwise inference and tests run on CPU.
 
 ## Quick Start
 
-Launch the minimal reconstruction app:
+Launch the guided reconstruction interface:
 
 ```bash
-python app.py
+python app_3step.py
 ```
 
 Launch the fuller research interface:
@@ -265,9 +264,8 @@ pre-generated immutable dataset instead of generating data inside the script.
 
 ## Gradio Interfaces
 
-There are three local interfaces:
+There are two local interfaces:
 
-- `python app.py`: lightweight 2D upload-and-reconstruct demo
 - `python app_3step.py`: guided workflow for data input, model selection, and
   result inspection
 - `python app_training.py`: full research workflow for dataset generation,
