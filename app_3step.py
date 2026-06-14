@@ -79,7 +79,7 @@ MODEL_GRID_SUPPORT = {
     "3d_ilt": [16, 64],
 }
 
-# Visualization style constants (paper-like, bright and comparable)
+# Visualization style constants
 DISPLAY_CMAP = "viridis"
 DISPLAY_INTERPOLATION = "bilinear"
 DISPLAY_CLIP_PERCENTILE = 99.9
@@ -88,7 +88,7 @@ DISPLAY_SPECTRUM_SMOOTH_SIGMA = 0.8
 
 try:
     from scipy.ndimage import gaussian_filter as _scipy_gaussian_filter
-except Exception:  # pragma: no cover - optional dependency fallback
+except Exception:
     _scipy_gaussian_filter = None
 
 
@@ -683,7 +683,7 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
     params = result.params
     grid_size = result.grid_size
 
-    # For 16x16, use nearest neighbor (no interpolation); for 64x64, use bilinear
+    # For 16x16, use nearest neighbor; for 64x64, use bilinear
     if grid_size == 16:
         display_interp = "nearest"  # No smoothing for small grids
         display_cmap = DISPLAY_CMAP
@@ -708,7 +708,7 @@ def _generate_preview_plot(result: SignalInputResult) -> tuple[plt.Figure, str]:
     axes[1].set_ylabel("b1 index")
     plt.colorbar(im1, ax=axes[1], fraction=0.046, pad=0.04)
 
-    # Ground Truth (brighter linear display)
+    # Ground Truth
     # For 16x16, don't apply smoothing or interpolation; for 64x64, apply both
     if ground_truth is not None:
         if grid_size == 16:
