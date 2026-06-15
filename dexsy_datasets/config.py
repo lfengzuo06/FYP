@@ -163,15 +163,7 @@ class DatasetConfig:
 
 
 def validate_config(config: Union[Dict[str, Any], DatasetConfig]) -> List[str]:
-    """
-    Validate dataset configuration.
-
-    Args:
-        config: Config dict or DatasetConfig object
-
-    Returns:
-        List of validation error messages (empty if valid)
-    """
+    """Validate dataset configuration."""
     errors = []
 
     if isinstance(config, DatasetConfig):
@@ -250,16 +242,10 @@ def validate_config(config: Union[Dict[str, Any], DatasetConfig]) -> List[str]:
 def load_config(path: Union[str, Path]) -> DatasetConfig:
     """
     Load and validate dataset config from YAML file.
-
     Args:
         path: Path to config YAML file
-
     Returns:
         Validated DatasetConfig
-
-    Raises:
-        FileNotFoundError: Config file not found
-        ValueError: Config validation failed
     """
     config = DatasetConfig.from_yaml(path)
     errors = validate_config(config)

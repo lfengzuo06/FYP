@@ -59,20 +59,7 @@ def create_dataset(
     output_dir: str = "datasets",
     generator_version: str = "1.0.0",
 ) -> ImmutableDataset:
-    """
-    Create and save a new dataset.
-
-    Args:
-        config: DatasetConfig, config dict, or path to config YAML
-        output_dir: Base directory for dataset storage
-        generator_version: Generator version for metadata
-
-    Returns:
-        ImmutableDataset instance
-
-    Raises:
-        ValueError: If config validation fails
-    """
+    """Create and save a new dataset."""
     if isinstance(config, str):
         config = load_config(config)
 
@@ -100,25 +87,7 @@ def extend_dataset(
     output_dir: str = "datasets",
     generator_version: str = "1.0.0",
 ) -> ImmutableDataset:
-    """
-    Extend an existing dataset by adding training samples.
-
-    Note: This is a REGENERATE approach, not a file-based append.
-    - Val/Test splits are NEVER modified (fairness + repeatability)
-    - Only train split grows by n_add_train samples
-    - Uses SAME generation config as base (same seed, same params)
-    - New dataset_id = hash(normalized_config + n_total_train)
-    - Val/Test samples are re-generated from the same seed, ensuring identical data
-
-    Args:
-        base_dataset_id: ID of base dataset to extend
-        n_add_train: Number of new training samples to add
-        output_dir: Base directory for dataset storage
-        generator_version: Generator version for metadata
-
-    Returns:
-        New ImmutableDataset with extended train split
-    """
+    """Extend an existing dataset by adding training samples."""
     base = load_dataset(base_dataset_id, output_dir)
 
     config = DatasetConfig.from_dict(base.config)

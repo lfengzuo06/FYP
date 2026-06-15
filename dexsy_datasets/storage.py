@@ -25,18 +25,7 @@ def get_dataset_path(dataset_id: str, base_path: Union[str, Path] = "datasets") 
 
 
 def compute_checksum(data_dir: Union[str, Path]) -> str:
-    """
-    Compute SHA256 checksum of core dataset payload files.
-
-    Intentionally excludes metadata/checksum bookkeeping files to avoid
-    self-referential checksum updates.
-
-    Args:
-        data_dir: Path to dataset directory
-
-    Returns:
-        SHA256 hex digest
-    """
+    """Compute SHA256 checksum of core dataset payload files."""
     data_dir = Path(data_dir)
     hasher = hashlib.sha256()
 
@@ -59,16 +48,7 @@ def compute_checksum(data_dir: Union[str, Path]) -> str:
 
 
 def verify_checksum(data_dir: Union[str, Path], expected_checksum: str) -> bool:
-    """
-    Verify dataset integrity by comparing checksum.
-
-    Args:
-        data_dir: Path to dataset directory
-        expected_checksum: Expected SHA256 hex digest
-
-    Returns:
-        True if checksum matches
-    """
+    """Verify dataset integrity by comparing checksum. """
     actual = compute_checksum(data_dir)
     return actual == expected_checksum
 
@@ -78,28 +58,7 @@ def save_dataset(
     base_path: Union[str, Path] = "datasets",
     generator_version: str = "1.0.0",
 ) -> Path:
-    """
-    Save immutable dataset to disk.
-
-    Creates directory structure:
-        datasets/<dataset_id>/
-        ├── signals.npz
-        ├── spectra.npz (optional)
-        ├── pathway_weights.npz (optional)
-        ├── dei.npz (optional)
-        ├── splits.json
-        ├── config.yaml
-        ├── metadata.json
-        └── checksum.sha256
-
-    Args:
-        dataset: ImmutableDataset instance
-        base_path: Base directory for datasets
-        generator_version: Version of the generator code
-
-    Returns:
-        Path to saved dataset directory
-    """
+    """Save immutable dataset to disk."""
     data_dir = get_dataset_path(dataset.dataset_id, base_path)
     data_dir.mkdir(parents=True, exist_ok=True)
 
@@ -146,21 +105,7 @@ def load_dataset(
     base_path: Union[str, Path] = "datasets",
     verify: bool = True,
 ) -> "ImmutableDataset":
-    """
-    Load immutable dataset from disk.
-
-    Args:
-        dataset_id: Dataset identifier
-        base_path: Base directory for datasets
-        verify: Whether to verify checksum
-
-    Returns:
-        ImmutableDataset instance
-
-    Raises:
-        FileNotFoundError: Dataset directory not found
-        ValueError: Checksum verification failed
-    """
+    """Load immutable dataset from disk."""
     from dexsy_datasets.core import ImmutableDataset
 
     data_dir = get_dataset_path(dataset_id, base_path)
@@ -219,16 +164,7 @@ def list_datasets(
     base_path: Union[str, Path] = "datasets",
     include_metadata: bool = False,
 ) -> List[Union[str, Dict[str, Any]]]:
-    """
-    List all datasets in the base directory.
-
-    Args:
-        base_path: Base directory for datasets
-        include_metadata: Whether to include metadata for each dataset
-
-    Returns:
-        List of dataset IDs or dicts with metadata
-    """
+    """List all datasets in the base directory. """
     base_path = Path(base_path)
 
     if not base_path.exists():
@@ -262,16 +198,7 @@ def get_dataset_info(
     dataset_id: str,
     base_path: Union[str, Path] = "datasets",
 ) -> Dict[str, Any]:
-    """
-    Get summary info for a dataset.
-
-    Args:
-        dataset_id: Dataset identifier
-        base_path: Base directory for datasets
-
-    Returns:
-        Dict with dataset info
-    """
+    """ Get summary info for a dataset."""
     data_dir = get_dataset_path(dataset_id, base_path)
 
     if not data_dir.exists():

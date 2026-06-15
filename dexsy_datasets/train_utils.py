@@ -91,17 +91,7 @@ class DatasetWrapper(torch.utils.data.Dataset):
 
 
 def create_model(model_name: str, task_type: str, **kwargs) -> torch.nn.Module:
-    """
-    Create a model by name.
-
-    Args:
-        model_name: Model identifier
-        task_type: 'reconstruction' or 'pathway_regression'
-        **kwargs: Model-specific parameters
-
-    Returns:
-        Initialized model
-    """
+    """Create a model by name."""
     if task_type == "pathway_regression":
         if model_name == "cnn_nongaussian":
             return create_cnn_nongaussian(**kwargs)
@@ -236,17 +226,7 @@ def train_and_eval(
     run_config: Union[TrainingRunConfig, Dict[str, Any]],
     device: Optional[str] = None,
 ) -> TrainingResult:
-    """
-    Train a model on the dataset and evaluate.
-
-    Args:
-        dataset: ImmutableDataset to train on
-        run_config: Training configuration
-        device: Device to train on (auto-detect if None)
-
-    Returns:
-        TrainingResult with metrics
-    """
+    """Train a model on the dataset and evaluate."""
     if isinstance(run_config, dict):
         run_config = TrainingRunConfig.from_dict(run_config)
 
@@ -516,13 +496,6 @@ def compare_models(
 ) -> Dict[str, Any]:
     """
     Run fair model comparison on the same dataset.
-
-    Args:
-        dataset: ImmutableDataset to evaluate on
-        models: List of model names to compare
-        seeds: List of random seeds for each run
-        output_path: Optional path to save results
-
     Returns:
         Dict with results DataFrame and summary statistics
     """

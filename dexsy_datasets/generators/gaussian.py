@@ -23,17 +23,7 @@ def generate_gaussian_dataset(
     output_dir: Optional[str] = None,
     generator_version: str = "1.0.0",
 ) -> ImmutableDataset:
-    """
-    Generate a Gaussian DEXSY dataset (2C/3C/NC).
-
-    Args:
-        config: DatasetConfig or config dict
-        output_dir: If provided, save the dataset to this directory
-        generator_version: Version string for reproducibility
-
-    Returns:
-        ImmutableDataset with signals and spectra
-    """
+    """Generate a Gaussian DEXSY dataset (2C/3C/NC). """
     if isinstance(config, dict):
         config = DatasetConfig.from_dict(config)
 

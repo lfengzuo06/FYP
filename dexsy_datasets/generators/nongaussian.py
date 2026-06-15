@@ -22,17 +22,7 @@ def generate_nongaussian_dataset(
     output_dir: Optional[str] = None,
     generator_version: str = "1.0.0",
 ) -> ImmutableDataset:
-    """
-    Generate a 3-compartment non-Gaussian DEXSY dataset.
-
-    Args:
-        config: DatasetConfig or config dict
-        output_dir: If provided, save the dataset to this directory
-        generator_version: Version string for reproducibility
-
-    Returns:
-        ImmutableDataset with signals, pathway_weights, and DEI
-    """
+    """Generate a 3-compartment non-Gaussian DEXSY dataset."""
     if isinstance(config, dict):
         config = DatasetConfig.from_dict(config)
 

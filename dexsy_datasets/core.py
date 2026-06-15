@@ -18,20 +18,7 @@ import numpy as np
 
 
 def compute_dataset_id(config: Dict[str, Any]) -> str:
-    """
-    Compute deterministic dataset ID from config.
-
-    The ID is SHA256 of the normalized (sorted keys) config JSON.
-    This ensures:
-    - Same config → same ID (reproducibility)
-    - Different config → different ID (uniqueness)
-
-    Args:
-        config: Dataset configuration dict
-
-    Returns:
-        16-character hex string (first 16 chars of SHA256)
-    """
+    """Compute deterministic dataset ID from config."""
     normalized = _normalize_config(config)
     json_str = json.dumps(normalized, sort_keys=True, separators=(",", ":"))
     full_hash = hashlib.sha256(json_str.encode()).hexdigest()
@@ -125,15 +112,7 @@ class ImmutableDataset:
         return len(self.splits.get("test", []))
 
     def get_split(self, split: str) -> Dict[str, np.ndarray]:
-        """
-        Get arrays for a specific split.
-
-        Args:
-            split: 'train', 'val', or 'test'
-
-        Returns:
-            Dict with signal and label arrays for the split
-        """
+        """Get arrays for a specific split."""
         indices = self.splits.get(split, [])
         result = {"signals": self.signals[indices]}
 
@@ -149,14 +128,10 @@ class ImmutableDataset:
     def validate(self) -> bool:
         """
         Validate dataset integrity.
-
         Checks:
         - All required files exist
         - Checksum matches
         - Splits cover all samples
-
-        Returns:
-            True if valid
         """
         if len(self.signals) == 0:
             raise ValueError("Empty dataset")
