@@ -78,12 +78,7 @@ def create_forward_model_nc(
     profile: int | None = None,
     **kwargs,
 ) -> "ForwardModelNC":
-    """
-    Factory for ForwardModelNC with 16/64 profile support.
-
-    If ``profile`` is not provided and ``n_d`` matches a known profile,
-    that profile is auto-selected.
-    """
+    """Factory for ForwardModelNC with 16/64 profile support."""
     if profile is None and n_d in GRID_PROFILES_NC:
         profile = n_d
 
@@ -114,11 +109,7 @@ class ForwardModelNC:
     N-compartment DEXSY forward model.
 
     Implements the general N-compartment forward model where N can be any
-    positive integer. The model follows the mathematical formulation:
-        - b-values are computed from gradient strengths
-        - Exchange probabilities derived from exchange rates and mixing time
-        - Weight matrix constructed with scaling factor for diagonal dominance
-        - Signal computed via matrix multiplication with exponent matrices
+    positive integer.
     """
 
     def __init__(
@@ -143,33 +134,7 @@ class ForwardModelNC:
         alpha: float = 0.5,
         epsilon: float = 1e-10,
     ):
-        """
-        Initialize the N-compartment DEXSY forward model.
 
-        Args:
-            n_d: Number of diffusion coefficient grid points.
-            n_b: Number of gradient / b-value grid points.
-            d_min: Minimum diffusion coefficient.
-            d_max: Maximum diffusion coefficient.
-            g_max: Maximum gradient strength in T/m.
-            delta: Gradient pulse duration in seconds.
-            DELTA: Diffusion time in seconds.
-            gamma: Gyromagnetic ratio in rad/s/T.
-            gradient_spacing: "linear" or "log".
-            normalize_signals: If True, normalize by the noisy b=0 entry.
-            mixing_time_range: Mixing-time sampling range in seconds.
-            exchange_rate_range: Exchange-rate sampling range in s^-1.
-            jitter_pixels: Peak jitter in pixels.
-            smoothing_sigma_range: Gaussian broadening sigma range (pixels).
-            min_index_separation: Minimum projected grid separation between
-                compartment diffusivities.
-            compartment_ranges: Sampling ranges for diffusion values in each
-                biological compartment family.
-            spectral_broadening_mode: "directional" or "isotropic".
-            alpha: Scaling factor parameter for diagonal dominance constraint.
-                Default 0.5 ensures w_ii >= 0.5 * phi_i.
-            epsilon: Small constant for numerical stability.
-        """
         self.n_d = n_d
         self.n_b = n_b
         self.delta = delta
@@ -215,7 +180,6 @@ class ForwardModelNC:
         else:
             raise ValueError(f"Unknown gradient spacing: {gradient_spacing}")
 
-        # Precompute b-values (Step 1)
         coeff = (gamma ** 2) * (delta ** 2) * (DELTA - delta / 3.0)
         self.b1 = (self.G1 ** 2) * coeff
         self.b2 = (self.G2 ** 2) * coeff
@@ -227,7 +191,6 @@ class ForwardModelNC:
             24,
         )
 
-        # Precompute exponent matrices (Step 2)
         self._compute_exponent_matrices()
 
         # Compute kernel matrix for physics-informed loss
@@ -242,12 +205,7 @@ class ForwardModelNC:
         self.kernel_matrix = self._kernel.reshape(self.n_b * self.n_b, self.n_d * self.n_d)
 
     def _compute_exponent_matrices(self):
-        """
-        Compute the exponent matrices A_1 and A_2.
-
-        Step 2: A_1(m,u) = exp(-b_1(m) * D_u)
-                 A_2(n,v) = exp(-b_2(n) * D_v)
-        """
+        """Compute the exponent matrices A_1 and A_2."""
         self.A1 = np.exp(-self.b1[:, None] * self.D[None, :])  # (n_b, n_d)
         self.A2 = np.exp(-self.b2[:, None] * self.D[None, :])  # (n_b, n_d)
 
@@ -305,19 +263,6 @@ class ForwardModelNC:
         """
         Build the N-compartment weight matrix.
 
-        Steps 3-6 of the forward model:
-
-        Step 3: p_ij = 1 - exp(-kappa_ij * tm) for i < j
-                p_ji = p_ij (symmetric)
-
-        Step 4: w_hat_ij = phi_i * phi_j * p_ij for i != j
-                w_hat_ii = 0
-
-        Step 5: lambda = min(1, min_i (alpha * phi_i / (sum_j!=i w_hat_ij + epsilon)))
-
-        Step 6: w_ij = lambda * w_hat_ij for i != j
-                w_ii = phi_i - sum_j!=i w_ij
-
         Args:
             N: Number of compartments.
             phi: Volume fractions of shape (N,).
@@ -333,7 +278,6 @@ class ForwardModelNC:
         phi = np.asarray(phi, dtype=np.float64)
         kappa = np.asarray(kappa, dtype=np.float64)
 
-        # Step 3: Compute exchange probabilities
         p = np.zeros((N, N), dtype=np.float64)
         for i in range(N):
             for j in range(i + 1, N):
@@ -341,7 +285,6 @@ class ForwardModelNC:
                 p[i, j] = prob
                 p[j, i] = prob
 
-        # Step 4: Compute unscaled off-diagonal weights
         w_hat = np.zeros((N, N), dtype=np.float64)
         for i in range(N):
             for j in range(i + 1, N):
@@ -349,7 +292,6 @@ class ForwardModelNC:
                 w_hat[i, j] = offdiag_mass
                 w_hat[j, i] = offdiag_mass
 
-        # Step 5: Compute scaling factor lambda
         row_offdiag = w_hat.sum(axis=1)  # sum over j != i
         valid_rows = row_offdiag > 0
 
@@ -380,22 +322,7 @@ class ForwardModelNC:
         mode: Optional[str] = None,
         rng=None,
     ) -> np.ndarray:
-        """
-        Project compartment weight matrix to 2D diffusion grid.
-
-        Step 7: Project W to the (n_d x n_d) diffusion grid.
-
-        Args:
-            W: Weight matrix of shape (N, N).
-            D: Compartment diffusion values of shape (N,).
-            jitter_indices: Jittered grid indices for each compartment.
-            smoothing_sigma: Gaussian smoothing sigma.
-            mode: Projection mode - "directional" or "isotropic".
-            rng: Random number generator for reproducibility.
-
-        Returns:
-            f: 2D spectrum of shape (n_d, n_d).
-        """
+        """Project compartment weight matrix to 2D diffusion grid."""
         if mode is None:
             mode = self.spectral_broadening_mode
         if smoothing_sigma is None:
@@ -494,28 +421,11 @@ class ForwardModelNC:
         normalize: Optional[bool] = None,
         rng=None,
     ) -> np.ndarray:
-        """
-        Compute DEXSY signal from diffusion distribution.
+        """Compute DEXSY signal from diffusion distribution."""
 
-        Step 8: S = A_1 @ f @ A_2^T
-        Step 9: Add Rician noise
-        Step 10: Normalize by S[0,0]
-
-        Args:
-            f: 2D spectrum of shape (n_d, n_d).
-            noise_sigma: Standard deviation of noise.
-            noise_model: "rician", "gaussian", or "none".
-            normalize: Whether to normalize signal.
-            rng: Random number generator for reproducibility.
-
-        Returns:
-            S: Signal of shape (n_b, n_b).
-        """
-        # Step 8: Compute noiseless signal S = A_1 @ f @ A_2^T
         f = f.astype(np.float32)
         S = self.A1 @ f @ self.A2.T  # (n_b, n_b)
 
-        # Step 9: Add noise
         if noise_sigma > 0:
             if noise_model == "rician":
                 if rng is not None:
@@ -535,7 +445,6 @@ class ForwardModelNC:
             else:
                 raise ValueError(f"Unknown noise model: {noise_model}")
 
-        # Step 10: Normalize
         if normalize is None:
             normalize = self.normalize_signals
         if normalize:
@@ -559,29 +468,7 @@ class ForwardModelNC:
         return_reference_signal: bool = False,
         rng=None,
     ) -> tuple:
-        """
-        Generate one N-compartment DEXSY sample.
-
-        Args:
-            N: Number of compartments (2 or more).
-            phi: Volume fractions of shape (N,). If None, sampled from Dirichlet.
-            D: Compartment diffusion values of shape (N,). If None, sampled.
-            kappa: Exchange rate matrix of shape (N, N). If None, sampled.
-            mixing_time: Mixing time in seconds.
-            noise_sigma: Noise standard deviation.
-            jitter_pixels: Peak jitter in pixels.
-            smoothing_sigma: Gaussian broadening sigma.
-            noise_model: "rician", "gaussian", or "none".
-            normalize: Whether to normalize.
-            return_reference_signal: If True, also return clean signal.
-            rng: Random number generator for reproducibility.
-
-        Returns:
-            f: 2D spectrum (n_d, n_d).
-            S: Signal (n_b, n_b).
-            params: Dictionary with ground truth parameters.
-            [S_clean]: Optional clean signal if return_reference_signal=True.
-        """
+        """Generate one N-compartment DEXSY sample. """
         if N < 2:
             raise ValueError("N must be at least 2")
 
@@ -607,10 +494,8 @@ class ForwardModelNC:
         if kappa is None:
             kappa = self._sample_exchange_rate_matrix(N, rng=rng)
 
-        # Build weight matrix (Steps 3-6)
         W, lam, p = self.build_weight_matrix(N, phi, kappa, mixing_time)
 
-        # Project to diffusion grid (Step 7)
         f, used_sigma, jitter_indices = self._project_weight_matrix(
             W=W,
             D=D,
@@ -619,7 +504,6 @@ class ForwardModelNC:
             rng=rng,
         )
 
-        # Compute signals (Steps 8-10)
         S_clean = self.compute_signal(f, noise_sigma=0.0, normalize=normalize, noise_model="none", rng=rng)
         S = self.compute_signal(f, noise_sigma=noise_sigma, normalize=normalize, noise_model=noise_model, rng=rng)
 
@@ -654,13 +538,7 @@ class ForwardModelNC:
         jitter_pixels: Optional[int] = None,
         rng=None,
     ) -> np.ndarray:
-        """
-        Sample compartment diffusivities while keeping them distinct on the grid.
 
-        For N compartments, we cycle through the three predefined ranges:
-        (intracellular, extracellular, fast) and sample within each.
-        Uses deterministic spacing as fallback to guarantee separation.
-        """
         if jitter_pixels is None:
             jitter_pixels = self.jitter_pixels
 
@@ -705,10 +583,6 @@ class ForwardModelNC:
                 np.abs(indices[:, None] - indices[None, :]) + np.eye(N) * self.n_d
             )
             if min_dist < min_separation:
-                # Deterministic fallback: distribute compartments evenly across grid
-                # Each compartment needs at least min_separation pixels
-                # Total needed: N * min_separation <= n_d for non-overlapping
-                # We distribute compartments as evenly as possible
                 total_needed = N * min_separation
                 if total_needed > self.n_d:
                     # Reduce min_separation proportionally
@@ -717,8 +591,6 @@ class ForwardModelNC:
                 else:
                     effective_min_sep = min_separation
 
-                # Place compartments at evenly spaced indices
-                # Start from middle of first slot, then every effective_min_sep pixels
                 start_offset = effective_min_sep // 2
                 for i in range(N):
                     idx = start_offset + i * effective_min_sep
@@ -817,24 +689,7 @@ class ForwardModelNC:
         seed: int = None,
         **kwargs,
     ) -> tuple:
-        """
-        Generate a batch of N-compartment DEXSY samples.
-
-        Args:
-            n_samples: Number of samples.
-            N: Number of compartments.
-            noise_sigma: Fixed noise level.
-            noise_sigma_range: Range for random noise sampling (low, high).
-            return_reference_signal: Whether to return clean signals.
-            seed: Random seed for reproducibility (uses np.random.default_rng).
-            **kwargs: Passed to generate_ncompartment_sample.
-
-        Returns:
-            F: Spectra of shape (n_samples, n_d, n_d).
-            S: Signals of shape (n_samples, n_b, n_b).
-            params_list: List of parameter dicts.
-            [S_clean]: Optional clean signals.
-        """
+        """Generate a batch of N-compartment DEXSY samples."""
         rng = np.random.default_rng(seed)
 
         F = np.zeros((n_samples, self.n_d, self.n_d), dtype=np.float32)
@@ -873,11 +728,7 @@ class ForwardModelNC:
 
 
 def compute_nc_weight_matrix_dei(weight_matrix: np.ndarray) -> float:
-    """
-    Compute DEI from an N-compartment weight matrix.
-
-    DEI = sum(off-diagonal) / sum(diagonal)
-    """
+    """Compute DEI from an N-compartment weight matrix."""
     weight_matrix = np.asarray(weight_matrix, dtype=np.float64)
     diag_sum = float(np.trace(weight_matrix))
     off_diag_sum = float(weight_matrix.sum() - diag_sum)

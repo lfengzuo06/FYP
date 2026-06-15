@@ -1,9 +1,5 @@
 """
-Paper-aligned 2D DEXSY forward model.
-
-This module implements the same core Laplace forward operator as the earlier
-student code, but the default synthetic data generator now follows the
-simulation framework described in steven_submission.pdf:
+2D DEXSY forward model.
 
 1. 64x64 diffusion and signal grids
 2. Log-spaced compartment diffusivities spanning intracellular, extracellular,
@@ -81,29 +77,10 @@ def create_forward_model(
     When n_d matches a known profile (16 or 64), profile mode is automatically used
     unless explicitly overridden by setting profile=None.
 
-    Args:
-        n_d: Number of diffusion grid points.
-        n_b: Number of b-value grid points.
-        profile: Grid size profile (16 or 64). If provided, uses profile settings
-            and overrides n_d/n_b with the profile value. If None (default), auto-detects
-            based on n_d matching a known profile.
-        **kwargs: Override any profile parameter.
+    profile: Grid size profile (16 or 64). 
 
     Returns:
         ForwardModel2D instance configured with the specified grid size.
-
-    Examples:
-        # Auto-detect profile from n_d
-        fm = create_forward_model(n_d=16, n_b=16)  # Uses 16 profile
-
-        # Explicit profile
-        fm = create_forward_model(profile=16)
-
-        # Explicit override (use explicit params even if n_d=16)
-        fm = create_forward_model(n_d=16, n_b=16, profile=None)
-
-        # With custom overrides
-        fm = create_forward_model(profile=16, jitter_pixels=1)
     """
     # Auto-detect profile if n_d matches a known profile and profile is not explicitly set
     if profile is None and n_d in GRID_PROFILES:
@@ -480,13 +457,7 @@ class ForwardModel2D:
         smoothing_sigma: float = None,
         rng=None,
     ) -> tuple:
-        """
-        Project a compartment-level weight matrix onto the 2D D-grid.
-
-        Each compartment pair is placed near its ideal grid location, then the
-        spectrum is broadened with Gaussian smoothing to match the paper's
-        structural spectrum generation stage.
-        """
+        """     Project a compartment-level weight matrix onto the 2D D-grid.   """
         if jitter_pixels is None:
             jitter_pixels = self.jitter_pixels
         if smoothing_sigma is None:
@@ -549,12 +520,7 @@ class ForwardModel2D:
         noise_model: str = "rician",
         rng=None,
     ) -> np.ndarray:
-        """
-        Compute a DEXSY signal from a diffusion distribution.
-
-        The paper normalises after noise addition, so the b=0 scaling is always
-        applied after any noise model has been injected.
-        """
+        """Compute a DEXSY signal from a diffusion distribution. """
         if f.ndim == 2:
             f = f[None, ...]
 
@@ -605,7 +571,7 @@ class ForwardModel2D:
         smoothing_sigma: float = None,
         rng=None,
     ) -> tuple:
-        """Generate a broadened paper-style 2D spectrum and metadata."""
+        """Generate a broadened 2D spectrum and metadata."""
         exchange_probs = np.zeros_like(exchange_rates, dtype=np.float64)
         for i in range(exchange_rates.shape[0]):
             for j in range(i + 1, exchange_rates.shape[1]):
@@ -696,7 +662,7 @@ class ForwardModel2D:
         return_reference_signal: bool = False,
         rng=None,
     ) -> tuple:
-        """Generate one paper-style 3-compartment DEXSY sample with nine peaks."""
+        """Generate one 3-compartment DEXSY sample with nine peaks."""
         mixing_time = self._sample_mixing_time(mixing_time, rng=rng)
         noise_sigma = self._sample_noise_sigma(noise_sigma, noise_sigma_range, rng=rng)
 
@@ -760,13 +726,7 @@ class ForwardModel2D:
         return f, s, params
 
     def generate_2compartment_sparse(self, **kwargs) -> tuple:
-        """
-        Backwards-compatible wrapper.
-
-        The name is retained so existing notebooks do not break, but the output
-        now follows the paper-style broadened 2C simulation rather than the old
-        four-delta sparse generator.
-        """
+        """Backwards-compatible wrapper."""
         return self.generate_2compartment_paper(**kwargs)
 
     def generate_ncompartment_sample(
@@ -788,29 +748,8 @@ class ForwardModel2D:
         """
         Generate one N-compartment DEXSY sample with arbitrary N (2-7).
 
-        For N=2 or N=3, uses the existing paper-style generators.
+        For N=2 or N=3, uses the existing generators.
         For N>3, samples from the predefined compartment ranges cyclically.
-
-        Args:
-            N: Number of compartments (2-7).
-            phi: Volume fractions of shape (N,). If None, sampled from Dirichlet.
-            D: Compartment diffusion values of shape (N,). If None, sampled.
-            kappa: Exchange rate matrix of shape (N, N). If None, sampled.
-            mixing_time: Mixing time in seconds.
-            noise_sigma: Fixed noise level.
-            noise_sigma_range: Range for random noise sampling.
-            jitter_pixels: Peak jitter in pixels.
-            smoothing_sigma: Gaussian broadening sigma.
-            noise_model: "rician", "gaussian", or "none".
-            normalize: Whether to normalize signal.
-            return_reference_signal: If True, also return clean signal.
-            rng: Random number generator for reproducibility.
-
-        Returns:
-            f: 2D spectrum (n_d, n_d).
-            S: Signal (n_b, n_b).
-            params: Dictionary with ground truth parameters.
-            [S_clean]: Optional clean signal if return_reference_signal=True.
         """
         if N == 2:
             return self.generate_2compartment_paper(
@@ -945,18 +884,7 @@ class ForwardModel2D:
         seed: int = None,
         **kwargs,
     ) -> tuple:
-        """
-        Generate a batch of paper-style DEXSY samples.
-
-        Args:
-            n_samples: Number of samples to generate.
-            noise_sigma: Optional fixed noise level.
-            noise_sigma_range: Paper-style continuous noise range.
-            n_compartments: Number of compartments (2-7).
-            return_reference_signal: Whether to return clean signals.
-            seed: Random seed for reproducibility (uses np.random.default_rng).
-            **kwargs: Passed to the selected generator.
-        """
+        """ Generate a batch of DEXSY samples. """
         rng = np.random.default_rng(seed)
 
         F = np.zeros((n_samples, self.n_d, self.n_d), dtype=np.float32)
@@ -996,13 +924,7 @@ class ForwardModel2D:
         sharpen_strength: float = 0.38,
         renorm: bool = True,
     ) -> np.ndarray:
-        """
-        Compute a 2D ILT baseline using non-negative (Tikhonov-regularised) least squares.
-
-        Optional mild unsharp masking approximates the Gaussian deconvolution stage
-        described for the Python 2D ILT pipeline in the dissertation (reduces
-        over-smoothed off-diagonal leakage in DEI).
-        """
+        """Compute a 2D ILT baseline using non-negative (Tikhonov-regularised) least squares."""
         K = self.kernel_matrix
         s_flat = s.flatten().astype(np.float64)
 
@@ -1043,12 +965,7 @@ class ForwardModel2D:
         smoothing_sigma: float | None = None,
         normalize: bool | None = True,
     ) -> tuple:
-        """
-        Build a noise-free 2-compartment spectrum and signal for Section 3.1-style checks.
-
-        Uses the same exchange and projection path as ``generate_2compartment_paper`` so
-        validation matches the training forward model (no duplicate notebook physics).
-        """
+        """ Build a noise-free 2-compartment spectrum and signal."""
         diffusions = np.asarray(diffusions, dtype=np.float64).reshape(2)
         volume_fractions = np.asarray(volume_fractions, dtype=np.float64).reshape(2)
         pair_indices = tuple(int(self._nearest_diffusion_index(d)) for d in diffusions)
@@ -1101,34 +1018,7 @@ class ForwardModel2D:
         smoothing_sigma: float | None = None,
         normalize: bool | None = True,
     ) -> tuple:
-        """
-        Build a noise-free 3-compartment spectrum and signal for Section 3.1-style checks.
-
-        Uses the same exchange and projection path as ``generate_3compartment_paper`` so
-        validation matches the training forward model (no duplicate notebook physics).
-
-        Args:
-            diffusions: array of shape (3,) with [D_intra, D_extra, D_fast]
-            volume_fractions: array of shape (3,)
-            exchange_rates: tuple of (rate_01, rate_02, rate_12)
-            mixing_time: mixing time in seconds
-            jitter_pixels: peak jitter in pixels (default 0 for validation)
-            smoothing_sigma: Gaussian broadening sigma (default random from range)
-            normalize: whether to normalize signal by b=0 (default True)
-
-        Returns:
-            f: 64x64 spectrum
-            clean_signal: 64x64 signal
-            params: dict with ground truth metadata including:
-                - n_compartments: 3
-                - diffusions: list of 3 diffusion coefficients
-                - volume_fractions: list of 3 fractions
-                - exchange_rates: dict with keys "0-1", "0-2", "1-2"
-                - weight_matrix: 3x3 symmetric matrix
-                - theoretical_dei: exact DEI from weight matrix
-                - compartment_indices: grid indices for each compartment
-                - expected_peak_centres: dict with all 9 peak locations
-        """
+        """Build a noise-free 3-compartment spectrum and signal."""
         diffusions = np.asarray(diffusions, dtype=np.float64).reshape(3)
         volume_fractions = np.asarray(volume_fractions, dtype=np.float64).reshape(3)
         rate_01, rate_02, rate_12 = exchange_rates
@@ -1205,16 +1095,7 @@ class ForwardModel2D:
 
 
 def compute_dei(f: np.ndarray, diagonal_band_width: int = 5) -> float:
-    """
-    Compute Diffusion Exchange Index for broadened spectra.
-
-    Mass with |i - j| <= ``diagonal_band_width`` is treated as lying in the
-    D1 \\approx D2 (self-diffusion) band on the discrete grid; the rest counts
-    toward exchange. A width of ~5 matches the spatial spread of NNLS-based
-    2D ILT on this 64x64 grid so that ground-truth and inverted spectra are
-    compared on the same footing (a width of 2 is often too narrow once
-    broadening or ILT blur is present).
-    """
+    """Compute Diffusion Exchange Index."""
     n = f.shape[0]
     ii, jj = np.indices((n, n))
     diagonal_mask = np.abs(ii - jj) <= diagonal_band_width
@@ -1230,26 +1111,6 @@ def compute_pairwise_3c_dei(
 ) -> dict[str, float]:
     """
     Compute DEI for each of the 3 pairs in a 3-compartment spectrum.
-
-    This provides a breakdown of exchange contribution from each compartment pair,
-    which is useful for understanding the exchange structure in 3C systems.
-
-    Args:
-        f: 2D spectrum array (n_d x n_d)
-        compartment_indices: tuple of 3 grid indices for compartments 0, 1, 2
-        diagonal_band_width: width of diagonal band (default 5)
-
-    Returns:
-        dict with keys:
-            - diagonal_01: diagonal mass for pair 0-1
-            - off_diagonal_01: off-diagonal mass for pair 0-1
-            - dei_01_blob: blob-based DEI for pair 0-1
-            - diagonal_02: diagonal mass for pair 0-2
-            - off_diagonal_02: off-diagonal mass for pair 0-2
-            - dei_02_blob: blob-based DEI for pair 0-2
-            - diagonal_12: diagonal mass for pair 1-2
-            - off_diagonal_12: off-diagonal mass for pair 1-2
-            - dei_12_blob: blob-based DEI for pair 1-2
     """
     idx0, idx1, idx2 = compartment_indices
     radius = diagonal_band_width

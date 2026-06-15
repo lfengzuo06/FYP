@@ -14,21 +14,7 @@ import numpy as np
 
 
 def compute_dei(f: np.ndarray, diagonal_band_width: int = 5) -> float:
-    """
-    Compute Diffusion Exchange Index for broadened spectra.
-
-    Mass with |i - j| <= ``diagonal_band_width`` is treated as lying in the
-    D1 \\approx D2 (self-diffusion) band on the discrete grid; the rest counts
-    toward exchange. A width of ~5 matches the spatial spread of NNLS-based
-    2D ILT on this 64x64 grid.
-
-    Args:
-        f: 2D diffusion spectrum array
-        diagonal_band_width: Width of diagonal band for DEI computation
-
-    Returns:
-        DEI value (ratio of off-diagonal to diagonal mass)
-    """
+    """Compute Diffusion Exchange Index for broadened spectra. """
     n = f.shape[0]
     ii, jj = np.indices((n, n))
     diagonal_mask = np.abs(ii - jj) <= diagonal_band_width
@@ -38,44 +24,17 @@ def compute_dei(f: np.ndarray, diagonal_band_width: int = 5) -> float:
 
 
 def compute_mse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """
-    Compute Mean Squared Error.
-
-    Args:
-        y_true: Ground truth array
-        y_pred: Predicted array
-
-    Returns:
-        MSE value
-    """
+    """Compute Mean Squared Error."""
     return float(np.mean((y_true - y_pred) ** 2))
 
 
 def compute_mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """
-    Compute Mean Absolute Error.
-
-    Args:
-        y_true: Ground truth array
-        y_pred: Predicted array
-
-    Returns:
-        MAE value
-    """
+    """Compute Mean Absolute Error."""
     return float(np.mean(np.abs(y_true - y_pred)))
 
 
 def compute_rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    """
-    Compute Root Mean Squared Error.
-
-    Args:
-        y_true: Ground truth array
-        y_pred: Predicted array
-
-    Returns:
-        RMSE value
-    """
+    """Compute Root Mean Squared Error."""
     return np.sqrt(compute_mse(y_true, y_pred))
 
 
@@ -91,16 +50,6 @@ def compute_ssim(
     Compute Structural Similarity Index (SSIM) for 2D arrays.
 
     Simplified implementation for DEXSY spectra.
-
-    Args:
-        y_true: Ground truth 2D array
-        y_pred: Predicted 2D array
-        window_size: Size of the moving window
-        k1, k2: Stability constants
-        L: Dynamic range (if None, uses max value)
-
-    Returns:
-        SSIM value between -1 and 1
     """
     if L is None:
         L = max(y_true.max(), y_pred.max()) - min(y_true.min(), y_pred.min())
@@ -128,19 +77,7 @@ def compute_ssim(
 
 
 def compute_dssim(y_true: np.ndarray, y_pred: np.ndarray, **kwargs) -> float:
-    """
-    Compute Dissimilarity Structural Similarity Index.
-
-    DSSIM = 1 - SSIM/2, where 0 indicates perfect similarity.
-
-    Args:
-        y_true: Ground truth array
-        y_pred: Predicted array
-        **kwargs: Passed to compute_ssim
-
-    Returns:
-        DSSIM value (0 = perfect, higher = more dissimilar)
-    """
+    """Compute Dissimilarity Structural Similarity Index."""
     ssim = compute_ssim(y_true, y_pred, **kwargs)
     return 1.0 - ssim / 2.0
 
@@ -162,19 +99,7 @@ def compute_metrics_dict(
     dei_pred: float = None,
     diagonal_band_width: int = 5,
 ) -> dict[str, float]:
-    """
-    Compute all standard metrics as a dictionary.
-
-    Args:
-        y_true: Ground truth spectrum
-        y_pred: Predicted spectrum
-        dei_true: Pre-computed DEI for ground truth (if None, computed)
-        dei_pred: Pre-computed DEI for prediction (if None, computed)
-        diagonal_band_width: DEI diagonal band width
-
-    Returns:
-        Dictionary with all metrics
-    """
+    """Compute all standard metrics as a dictionary."""
     if dei_true is None:
         dei_true = compute_dei(y_true, diagonal_band_width)
     if dei_pred is None:
@@ -197,17 +122,7 @@ def compute_batch_metrics(
     y_pred_batch: np.ndarray,
     diagonal_band_width: int = 5,
 ) -> dict[str, dict]:
-    """
-    Compute per-sample and aggregate metrics for a batch.
-
-    Args:
-        y_true_batch: Batch of ground truth spectra (N, H, W) or (N, 1, H, W)
-        y_pred_batch: Batch of predicted spectra (N, H, W) or (N, 1, H, W)
-        diagonal_band_width: DEI diagonal band width
-
-    Returns:
-        Dictionary with 'per_sample' and 'aggregate' metrics
-    """
+    """Compute per-sample and aggregate metrics for a batch."""
     if y_true_batch.ndim == 4 and y_true_batch.shape[1] == 1:
         y_true_batch = y_true_batch[:, 0]
     if y_pred_batch.ndim == 4 and y_pred_batch.shape[1] == 1:

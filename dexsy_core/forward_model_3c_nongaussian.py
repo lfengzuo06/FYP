@@ -60,12 +60,7 @@ def create_forward_model_3c_nongaussian(
     profile: int | None = None,
     **kwargs,
 ) -> "ForwardModel3CNonGaussian":
-    """
-    Factory for 3C non-Gaussian forward model with 16/64 profile support.
-
-    If ``profile`` is None and ``n_b`` matches a known profile (16 or 64),
-    that profile is auto-selected.
-    """
+    """Factory for 3C non-Gaussian forward model with 16/64 profile support."""
     if profile is None and n_b in GRID_PROFILES_3C_NG:
         profile = n_b
 
@@ -173,14 +168,7 @@ class ForwardModel3CNonGaussian:
         k_ts: float = 0.0,
         k_st: float = 0.0,
     ) -> np.ndarray:
-        """
-        Build 3-state CTMC generator Q in E/T/S order.
-
-        Q =
-            [[-(kET+kES),  kET,         kES      ],
-             [kTE,         -(kTE+kTS),  kTS      ],
-             [kSE,          kST,        -(kSE+kST)]]
-        """
+        """Build 3-state CTMC generator Q in E/T/S order."""
         k_et = float(k_et)
         k_te = float(k_te)
         k_es = float(k_es)
@@ -213,19 +201,7 @@ class ForwardModel3CNonGaussian:
         k_ts: float = 0.0,
         k_st: float = 0.0,
     ) -> tuple[np.ndarray, dict[str, float]]:
-        """
-        Build Q from permeability + detailed balance (Stanisz-style mapping).
-
-        Sphere:
-            k_SE = 6 * P_S / a_S
-
-        Axon/ellipsoid:
-            k_TE = P_T * (A_T / V_T)
-
-        Detailed balance:
-            phi_S k_SE = phi_E k_ES
-            phi_T k_TE = phi_E k_ET
-        """
+        """Build Q from permeability + detailed balance. """
         phi_n = cls._validate_phi(phi)
         phi_e, phi_t, phi_s = float(phi_n[0]), float(phi_n[1]), float(phi_n[2])
         if phi_e <= 0:
@@ -275,7 +251,7 @@ class ForwardModel3CNonGaussian:
         a = q * float(mixing_time)
         if _scipy_expm is not None:
             p = _scipy_expm(a)
-        else:  # pragma: no cover - only used if scipy is unavailable.
+        else:
             vals, vecs = np.linalg.eig(a)
             p = vecs @ np.diag(np.exp(vals)) @ np.linalg.inv(vecs)
 
@@ -290,15 +266,7 @@ class ForwardModel3CNonGaussian:
         return p
 
     def _restricted_kernel(self, g: np.ndarray, restricted_length: float, diffusivity: float) -> np.ndarray:
-        """
-        Restricted attenuation kernel K_restrict(g, l, D, DELTA, delta).
-
-        K =
-            2(1-cos(ql)) / (ql)^2
-            + 4(ql)^2 * sum_{n=1}^N
-                exp(-n^2*pi^2*D*DELTA/l^2) *
-                [1 - (-1)^n cos(ql)] / [((ql)^2 - (n*pi)^2)^2]
-        """
+        """Restricted attenuation kernel K_restrict(g, l, D, DELTA, delta)."""
         if restricted_length <= 0:
             raise ValueError("restricted_length must be positive.")
         if diffusivity <= 0:
@@ -371,10 +339,7 @@ class ForwardModel3CNonGaussian:
 
     @staticmethod
     def compute_dei_from_weight_matrix(weight_matrix: np.ndarray) -> float:
-        """
-        Compute DEI from a 3x3 pathway weight matrix:
-            DEI = sum(off-diagonal) / sum(diagonal)
-        """
+
         w = np.asarray(weight_matrix, dtype=np.float64)
         if w.shape != (3, 3):
             raise ValueError("weight_matrix must have shape (3, 3).")
@@ -384,10 +349,7 @@ class ForwardModel3CNonGaussian:
 
     @staticmethod
     def compute_dei_from_pathway_weights(pathway_weights: dict[str, float]) -> float:
-        """
-        Compute DEI from pathway dictionary with keys:
-            EE, ET, ES, TE, TT, TS, SE, ST, SS
-        """
+
         required = set(PATHWAYS_3C)
         keys = set(pathway_weights.keys())
         if required - keys:
@@ -404,15 +366,7 @@ class ForwardModel3CNonGaussian:
         normalize: bool = True,
         rng: np.random.Generator | None = None,
     ) -> np.ndarray:
-        """
-        Add Rician noise to a DEXSY signal matrix.
-
-        Args:
-            signal: Clean signal array of shape (n_b, n_b).
-            noise_sigma: Noise standard deviation.
-            normalize: If True, normalize by noisy S(0,0).
-            rng: Optional NumPy random generator.
-        """
+        """Add Rician noise to a DEXSY signal matrix. """
         s = np.asarray(signal, dtype=np.float64)
         if s.ndim != 2:
             raise ValueError("signal must be a 2D array.")
@@ -458,14 +412,7 @@ class ForwardModel3CNonGaussian:
         normalize: bool | None = None,
         return_pathway_signals: bool = False,
     ) -> tuple[np.ndarray, dict]:
-        """
-        Compute 3C non-Gaussian DEXSY signal on the current (g1, g2) grid.
-
-        Provide either:
-            - q (3x3 generator), or
-            - rates dict with keys k_et, k_te, k_es, k_se and optional k_ts, k_st.
-        If neither is provided, no-exchange Q=0 is used.
-        """
+        """Compute 3C non-Gaussian DEXSY signal on the current (g1, g2) grid."""
         if q is None:
             if rates is None:
                 q = np.zeros((3, 3), dtype=np.float64)
@@ -582,14 +529,7 @@ class ForwardModel3CNonGaussian:
         return_clean_signals: bool = False,
         seed: int | None = None,
     ) -> tuple[np.ndarray, list[dict], np.ndarray | None]:
-        """
-        Sample a synthetic 3C non-Gaussian DEXSY dataset.
-
-        Returns:
-            signals_noisy: (n_samples, n_b, n_b)
-            params_list: per-sample metadata list
-            signals_clean (optional): clean signals with same shape as noisy
-        """
+        """Sample a synthetic 3C non-Gaussian DEXSY dataset. """
         if n_samples < 1:
             raise ValueError("n_samples must be >= 1.")
 

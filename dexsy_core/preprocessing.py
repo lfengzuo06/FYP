@@ -64,13 +64,6 @@ def build_model_inputs(noisy_signals: np.ndarray, forward_model) -> np.ndarray:
     Channel 1: Raw signal
     Channel 2: Log-transformed signal (normalized)
     Channel 3: Positional encoding from D-grid
-
-    Args:
-        noisy_signals: Input signal array
-        forward_model: ForwardModel2D instance
-
-    Returns:
-        3-channel input array with shape (N, 3, n_b, n_b)
     """
     signals = validate_signal_grid(noisy_signals, forward_model)
     raw = signals[:, 0]
@@ -84,16 +77,7 @@ def build_model_inputs(noisy_signals: np.ndarray, forward_model) -> np.ndarray:
 
 
 def normalize_spectrum(spectrum: np.ndarray, eps: float = 1e-8) -> np.ndarray:
-    """
-    Normalize spectrum to sum to 1 (L1 normalization).
-
-    Args:
-        spectrum: Input spectrum array
-        eps: Small value to avoid division by zero
-
-    Returns:
-        Normalized spectrum
-    """
+    """Normalize spectrum to sum to 1 (L1 normalization)."""
     array = np.asarray(spectrum, dtype=np.float32)
     if array.ndim == 2:
         array = array[None, ...]
