@@ -4,8 +4,6 @@ Neural Operators for 2D DEXSY Inversion.
 Available models:
 - DeepONet: Branch + Trunk network architecture
 - FNO: Fourier Neural Operator
-
-Reference: Paper Section 2.4.4 - Neural Operators
 """
 
 from __future__ import annotations

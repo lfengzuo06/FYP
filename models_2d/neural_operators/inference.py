@@ -1,8 +1,6 @@
 """
 Inference pipeline for Neural Operator models (DeepONet, FNO).
 
-Reference: Paper Section 2.4.4 - Neural Operators
-
 Usage:
     from models_2d.neural_operators.inference import InferencePipeline
 

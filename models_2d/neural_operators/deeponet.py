@@ -6,7 +6,6 @@ DeepONet learns to map functions (operators) to functions. In our context:
 - Trunk Net: Takes the spatial coordinates (D1, D2 grid) as input
 - Output: Predicted spectrum value at each grid point
 
-Reference: Paper Section 2.4.4 - Neural Operators
 """
 
 from __future__ import annotations
@@ -171,12 +170,8 @@ class DeepONet2D(nn.Module):
             output_dim=output_dim,
         )
 
-        # Output scaling: initialize to produce reasonable output range (0.1-0.5)
-        # Use smaller initial scale since we need ~0.01 from dot product to match label range
         self.output_scale = nn.Parameter(torch.tensor(0.01))  # Small initial scale
 
-        # Output bias - initialize based on mean spectrum to help training
-        # With grid_size=64, we have 4096 points, so bias per point ≈ 0.0003 for mean ≈ 0.3
         self.bias = nn.Parameter(torch.zeros(1, grid_size * grid_size, 1) + 0.0003)
 
     def forward(self, signal: torch.Tensor) -> torch.Tensor:

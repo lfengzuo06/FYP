@@ -4,7 +4,7 @@ Plain U-Net model for 2D DEXSY Inversion.
 This implements the CNN baseline from paper Section 2.4.1:
 - 4 encoder blocks (2 conv each) + 4 decoder blocks
 - Max pooling downsampling
-- Bilinear upsampling + conv refinement (NOT transposed conv)
+- Bilinear upsampling + conv refinement
 - Skip connections
 - Channel progression: 32 -> 64 -> 128 -> 256
 - Single-channel output

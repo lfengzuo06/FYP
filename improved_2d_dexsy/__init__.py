@@ -5,8 +5,6 @@ This package is now a thin wrapper around the modular structure:
 - dexsy_core/: Shared scientific core (forward model, metrics, preprocessing)
 - models_2d/: Model implementations (attention_unet, plain_unet, etc.)
 - benchmarks_2d/: Benchmark infrastructure (ILT baseline, evaluation)
-
-All implementations are delegated to their respective modules.
 """
 
 from __future__ import annotations
@@ -122,16 +120,11 @@ class DEXSYInferencePipeline:
     """
     Unified inference pipeline that supports multiple model types.
 
-    This class wraps the model-specific inference pipelines and provides
-    a consistent interface with model_name dispatching.
-
     Args:
-        model_name: Model type ('attention_unet', 'plain_unet', 'pinn', 'deep_unfolding',
-                    'deeponet', 'fno', '2d_ilt', 'attention_unet_3c', 'plain_unet_3c',
-                    'pinn_3c', 'deep_unfolding_3c', '3d_ilt')
-        checkpoint_path: Path to model checkpoint (not needed for ILT)
-        device: Device to use ('cuda', 'cpu', or None for auto)
-        forward_model: ForwardModel2D instance (creates new if None)
+        model_name: Model type
+        checkpoint_path: Path to model checkpoint
+        device: Device to use
+        forward_model: ForwardModel2D instance
         alpha: ILT regularization parameter (only for 2d_ilt/3d_ilt)
         model_type: Neural operator type ('deeponet' or 'fno', only for neural operators)
         grid_size: Grid size for inference (16 or 64). Creates matching forward model if forward_model is None.

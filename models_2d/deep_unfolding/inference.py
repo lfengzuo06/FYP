@@ -1,7 +1,6 @@
 """
 Inference pipeline for Deep Unfolding (ISTA-Net style) model.
 
-Reference: Paper Section 2.4.3 - Deep Unfolding
 
 Usage:
     from models_2d.deep_unfolding import InferencePipeline
@@ -41,7 +40,7 @@ class PredictionResult:
 
 class InferencePipeline:
     """
-    Inference pipeline for Deep Unfolding (ISTA-Net style) model.
+    Inference pipeline for Deep Unfolding model.
 
     This class handles:
     - Loading trained model checkpoints

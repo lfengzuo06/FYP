@@ -1,8 +1,6 @@
 """
 Plain U-Net model for 2D DEXSY Inversion.
 
-CNN baseline implementation as described in paper Section 2.4.1.
-
 Standard interface module that exports:
 - PlainUNet2D: Model architecture
 - PlainUNetLoss: Loss function for training

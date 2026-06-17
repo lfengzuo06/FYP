@@ -26,7 +26,6 @@ class SimpleEncoderDecoder(nn.Module):
     Simple encoder-decoder architecture for spectrum prediction.
     
     Input: 64x64, Output: 64x64
-    Architecture: 64 -> 32 -> 16 -> 16 -> 32 -> 64
     """
     
     def __init__(self, in_channels: int = 3, base_filters: int = 64):

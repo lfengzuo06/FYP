@@ -1,12 +1,11 @@
 """
-FNO (Fourier Neural Operator) for 2D DEXSY Inversion.
+FNO for 2D DEXSY Inversion.
 
 FNO uses Fourier transforms to handle global dependencies efficiently:
 - Transform to Fourier domain
 - Apply learnable spectral filters
 - Transform back to spatial domain
 
-Reference: Paper Section 2.4.4 - Neural Operators
 """
 
 from __future__ import annotations

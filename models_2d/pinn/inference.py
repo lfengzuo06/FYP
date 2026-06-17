@@ -49,9 +49,6 @@ def _reference_state_keys() -> set[str]:
 def _checkpoint_compatibility_reason(checkpoint_path: Path) -> tuple[bool, str]:
     """
     Validate whether a checkpoint matches the current PINN2D architecture.
-
-    This prevents accidentally loading legacy PINN checkpoints from a different
-    architecture variant that share the same `pinn_*.pt` naming pattern.
     """
     try:
         checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)

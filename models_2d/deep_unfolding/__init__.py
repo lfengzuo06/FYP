@@ -1,7 +1,6 @@
 """
 Deep Unfolding (ISTA-Net style) model for 2D DEXSY Inversion.
 
-Reference: Paper Section 2.4.3 - Deep Unfolding
 
 Usage:
     from models_2d.deep_unfolding import DeepUnfolding2D, get_model, InferencePipeline

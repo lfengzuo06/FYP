@@ -1,5 +1,5 @@
 """
-Training script for Deep Unfolding (ISTA-Net style) on 3-Compartment DEXSY.
+Training script for Deep Unfolding on 3-Compartment DEXSY.
 
 Usage:
     python -m models_3d.deep_unfolding.train

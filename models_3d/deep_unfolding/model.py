@@ -1,8 +1,8 @@
 """
-Deep Unfolding model for 3-Compartment DEXSY Inversion (ISTA-Net style).
+Deep Unfolding model for 3-Compartment DEXSY Inversion.
 
 This module implements the Deep Unfolding architecture adapted for 3C data,
-which unrolls the ISTA (Iterative Shrinkage-Thresholding Algorithm)
+which unrolls the ISTA
 optimization into a learnable neural network.
 
 Key Mechanism:
@@ -22,7 +22,7 @@ import torch.nn.functional as F
 
 def soft_threshold(x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
     """
-    Soft-thresholding operator (proximal operator for L1 norm).
+    Soft-thresholding operator.
 
     S_theta(x) = sign(x) * max(|x| - theta, 0)
 
@@ -38,7 +38,7 @@ def soft_threshold(x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
 
 class ISTAProximalStep(nn.Module):
     """
-    Single ISTA (Iterative Shrinkage-Thresholding Algorithm) layer.
+    Single ISTA layer.
 
     Implements: x_{k+1} = soft_threshold(x_k - η * (K^T @ (Kx_k - s)), θ)
 
@@ -94,7 +94,7 @@ class ISTAProximalStep(nn.Module):
 
 class DeepUnfolding3C(nn.Module):
     """
-    Deep Unfolding (ISTA-Net style) for 3-Compartment DEXSY Inversion.
+    Deep Unfolding for 3-Compartment DEXSY Inversion.
 
     Architecture:
     - Initial estimate module: estimate x0 from signal s

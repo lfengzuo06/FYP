@@ -1,8 +1,6 @@
 """
 Attention U-Net model for 2D DEXSY Inversion.
 
-This module provides the Attention U-Net architecture as described in the
-DEXSY paper (Section 2.4.2), with physics-informed training support.
 """
 
 from __future__ import annotations

@@ -1,9 +1,6 @@
 """
 Deep Unfolding model for 2D DEXSY Inversion (ISTA-Net style).
 
-This module implements the Deep Unfolding architecture based on the paper's
-Section 2.4.3, which unrolls the ISTA (Iterative Shrinkage-Thresholding Algorithm)
-optimization into a learnable neural network.
 
 Key Mechanism:
 - Each layer = one ISTA iteration
@@ -12,7 +9,6 @@ Key Mechanism:
 - Optional learnable denoiser per layer
 - Forward kernel K is embedded into the architecture
 
-Reference: Paper Section 2.4.3 - Deep Unfolding (ISTA-Net style)
 """
 
 from __future__ import annotations
@@ -40,7 +36,7 @@ def soft_threshold(x: torch.Tensor, theta: torch.Tensor) -> torch.Tensor:
 
 class ISTAProximalStep(nn.Module):
     """
-    Single ISTA (Iterative Shrinkage-Thresholding Algorithm) layer.
+    Single ISTA layer.
 
     Implements: x_{k+1} = soft_threshold(x_k - η * (K^T @ (Kx_k - s)), θ)
 
@@ -98,7 +94,7 @@ class ISTAProximalStep(nn.Module):
 
 class DeepUnfolding2D(nn.Module):
     """
-    Deep Unfolding (ISTA-Net style) for 2D DEXSY Inversion.
+    Deep Unfolding for 2D DEXSY Inversion.
 
     Architecture:
     - Initial estimate module: estimate x0 from signal s
